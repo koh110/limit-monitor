@@ -1,0 +1,55 @@
+{
+  "name": "shared",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    },
+    "./src/index": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    },
+    "./src/contracts": {
+      "types": "./dist/src/contracts.d.ts",
+      "default": "./dist/src/contracts.js"
+    },
+    "./src/freshness": {
+      "types": "./dist/src/freshness.d.ts",
+      "default": "./dist/src/freshness.js"
+    },
+    "./src/remaining": {
+      "types": "./dist/src/remaining.d.ts",
+      "default": "./dist/src/remaining.js"
+    },
+    "./src/selection": {
+      "types": "./dist/src/selection.d.ts",
+      "default": "./dist/src/selection.js"
+    },
+    "./src/db/schema": {
+      "types": "./dist/src/db/schema.d.ts",
+      "default": "./dist/src/db/schema.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc --build tsconfig.json",
+    "tsc": "tsc --build tsconfig.test.json",
+    "vitest": "vp test run --config=./vite.config.ts",
+    "test": "concurrently \"npm run tsc\" \"npm run vitest\"",
+    "test-ci": "vp test run --config=./vite.config.ts --maxWorkers=1",
+    "format": "vp fmt package.json src --write",
+    "format-check": "vp fmt package.json src --check",
+    "lint": "vp lint src",
+    "lint-fix": "vp lint src --fix"
+  },
+  "dependencies": {
+    "drizzle-orm": "1.0.0-rc.4",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.5",
+    "concurrently": "^9.2.4",
+    "typescript": "^6.0.3"
+  }
+}

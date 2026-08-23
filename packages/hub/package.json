@@ -1,0 +1,36 @@
+{
+  "name": "hub",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --build tsconfig.json",
+    "predev": "npm run build",
+    "dev": "node --watch dist/src/index.js",
+    "start": "node dist/src/index.js",
+    "tsc": "tsc --build tsconfig.test.json",
+    "vitest": "vp test --config=./vite.config.ts",
+    "test": "npm run tsc && npm run test-ci",
+    "test-ci": "vp test run --config=./vite.config.ts --maxWorkers=1",
+    "db-generate": "drizzle-kit generate",
+    "predb-migrate": "npm run build",
+    "db-migrate": "node --experimental-strip-types ./bin/migrate.ts",
+    "pretokens": "npm run build",
+    "tokens": "node --experimental-strip-types ./bin/tokens.ts",
+    "format": "vp fmt package.json src bin test drizzle.config.ts --write",
+    "format-check": "vp fmt package.json src bin test drizzle.config.ts --check",
+    "lint": "vp lint src bin test drizzle.config.ts",
+    "lint-fix": "vp lint src bin test drizzle.config.ts --fix"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.17",
+    "drizzle-orm": "1.0.0-rc.4",
+    "hono": "^4.13.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.5",
+    "concurrently": "^9.2.4",
+    "drizzle-kit": "1.0.0-rc.4",
+    "typescript": "^6.0.3"
+  }
+}
