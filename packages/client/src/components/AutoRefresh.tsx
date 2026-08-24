@@ -1,26 +1,23 @@
-'use client'
-import { useRouter } from 'next/navigation'
 import { useEffect } from 'react'
 
 type Props = {
   intervalMs: number
+  onRefresh: () => void
 }
 
 /**
- * 60 秒間隔とバックグラウンド復帰(visibilitychange)で server component を
- * 再描画させる。データ取得は page(server)側の責務で、ここはタイマーと
+ * 60 秒間隔とバックグラウンド復帰(visibilitychange)で onRefresh(loader revalidation)
+ * を呼び出す。データ取得は呼び出し側(route loader)の責務で、ここはタイマーと
  * visibility という外部システムへの購読だけを行う。
  */
-export function AutoRefresh({ intervalMs }: Props) {
-  const router = useRouter()
-
+export function AutoRefresh({ intervalMs, onRefresh }: Props) {
   useEffect(() => {
     const timer = setInterval(() => {
-      router.refresh()
+      onRefresh()
     }, intervalMs)
     function onVisibilityChange() {
       if (document.visibilityState === 'visible') {
-        router.refresh()
+        onRefresh()
       }
     }
     document.addEventListener('visibilitychange', onVisibilityChange)
@@ -28,7 +25,7 @@ export function AutoRefresh({ intervalMs }: Props) {
       clearInterval(timer)
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
-  }, [router, intervalMs])
+  }, [intervalMs, onRefresh])
 
   return null
 }

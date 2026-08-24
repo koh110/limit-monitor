@@ -1,6 +1,6 @@
 import type { StatusAccount, StatusBucket } from 'shared/src/contracts'
 import { displayTone } from 'shared/src/remaining'
-import { formatAgo, formatJst, formatUntilReset } from '../_lib/format'
+import { formatAgo, formatJst, formatUntilReset } from '../lib/format'
 
 const FRESHNESS_LABELS = {
   fresh: '最新',

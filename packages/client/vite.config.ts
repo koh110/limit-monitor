@@ -1,7 +1,10 @@
+import react from '@vitejs/plugin-react'
 import { configDefaults, defineConfig } from 'vite-plus'
 
 export default defineConfig({
+  plugins: [react()],
   test: {
-    exclude: [...configDefaults.exclude, '**/dist/**', '**/.next/**']
+    environment: 'happy-dom',
+    exclude: [...configDefaults.exclude, '**/dist/**']
   }
 })

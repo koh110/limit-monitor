@@ -1,9 +1,7 @@
-'use server'
-import 'server-only'
 import type { StatusResponse } from 'shared/src/contracts'
 import { statusResponseSchema } from 'shared/src/contracts'
 import type { Result } from 'shared/src/index'
-import { HUB_BASE_URL } from '../config.server'
+import { HUB_BASE_URL } from '../config'
 
 export async function fetchStatus(): Promise<Result<StatusResponse>> {
   try {

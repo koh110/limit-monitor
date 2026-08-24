@@ -1,18 +1,22 @@
+import { useLoaderData, useRevalidator } from 'react-router-dom'
+import { AccountCard } from '../components/AccountCard'
+import { AutoRefresh } from '../components/AutoRefresh'
 import { REFRESH_INTERVAL_MS } from '../constants'
-import { AccountCard } from './_components/AccountCard'
-import { AutoRefresh } from './_components/AutoRefresh'
-import { formatJst } from './_lib/format'
-import { fetchStatus } from './actions'
+import { fetchStatus } from '../lib/api-client'
+import { formatJst } from '../lib/format'
 
-export const dynamic = 'force-dynamic'
+export function dashboardLoader() {
+  return fetchStatus()
+}
 
-export default async function Page() {
-  const result = await fetchStatus()
+export function Dashboard() {
+  const result = useLoaderData() as Awaited<ReturnType<typeof dashboardLoader>>
+  const { revalidate } = useRevalidator()
   const now = new Date()
 
   return (
     <main className="dashboard">
-      <AutoRefresh intervalMs={REFRESH_INTERVAL_MS} />
+      <AutoRefresh intervalMs={REFRESH_INTERVAL_MS} onRefresh={revalidate} />
       <header className="dashboard-head">
         <h1>Limit Monitor</h1>
         {/* Result 型の絞り込みが必要なため条件分岐で描画する */}
@@ -49,7 +53,7 @@ export default async function Page() {
           <p className="empty-value">OFFLINE</p>
           <p>Limit Hub へ接続できません</p>
           <p className="empty-hint">
-            Hub の稼働状態と HUB_BASE_URL を確認してください(60 秒ごとに自動で再試行します)
+            Hub の稼働状態と VITE_HUB_BASE_URL を確認してください(60 秒ごとに自動で再試行します)
           </p>
         </section>
       )}

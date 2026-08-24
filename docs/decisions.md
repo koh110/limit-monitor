@@ -12,7 +12,7 @@
 | Hub listen port | `8787` | 仕様書の推奨例に従う |
 | 常駐方式 | systemd 主運用 | Docker Compose より単純で、Node 単体で完結する |
 | Web framework | Hono + `@hono/node-server` | service-template 準拠 |
-| Dashboard | Next.js App Router + React | service-template 準拠 |
+| Dashboard | Vite + React + react-router data-loader + 直接 CORS fetch | service-template 準拠 |
 | monorepo | npm workspaces(`packages/*`) | service-template 準拠 |
 | ツールチェーン | TypeScript + vite-plus(`vp test` / `vp fmt` / `vp lint`) | Vitest/Prettier を直接実行しない |
 | DB | SQLite | 個人利用の最新値保存に十分 |

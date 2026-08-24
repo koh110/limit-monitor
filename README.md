@@ -11,7 +11,7 @@ Web Dashboard / Stream Deck / iPhone から確認するための基盤。
 | --- | --- |
 | `packages/shared` | Observation/Status の契約 schema、freshness/残量計算、Drizzle DB schema |
 | `packages/hub` | Limit Hub。Hono + @hono/node-server。Ingest/Status API、SQLite 永続化 |
-| `packages/client` | Web Dashboard。Next.js App Router + React |
+| `packages/client` | Web Dashboard。Vite + React + react-router(data loader)。ブラウザから Hub へ直接 CORS 経由でアクセスする SPA |
 | `packages/collector` | Collector。Phase 1 では Codex/Claude fixture を送信する Linux mock collector |
 
 - ランタイム: Node.js 24.x
@@ -52,10 +52,13 @@ Codex / Claude の fixture 観測値が Hub へ送信される。
 ### Dashboard の起動
 
 ```bash
-npm run dev:client                 # http://localhost:3000
+npm run dev:client                 # http://localhost:5173
 ```
 
-Hub の URL は環境変数 `HUB_BASE_URL` で指定する(既定: `http://127.0.0.1:8787`)。
+Dashboard はブラウザから Hub へ直接 fetch する SPA(reverse proxy なし)。Hub の URL は
+build 時に焼き込まれる環境変数 `VITE_HUB_BASE_URL` で指定する(既定: `http://127.0.0.1:8787`)。
+Hub 側では、この Dashboard の origin を `CORS_ALLOWED_ORIGINS` に許可 origin として設定する必要がある
+(開発時の既定 origin は `http://localhost:5173`)。
 
 ## 開発コマンド
 

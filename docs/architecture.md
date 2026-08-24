@@ -10,7 +10,7 @@ flowchart TD
     C2["Claude statusLine / Collector"] -->|"normalized observation"| H
     H --> DB["SQLite"]
     SD["Stream Deck plugin"] -->|"LAN direct GET"| H
-    B["LAN browser"] -->|"LAN direct"| H
+    B["LAN browser (Dashboard SPA)"] -->|"LAN direct CORS fetch"| H
     IP["iPhone + Cloudflare One Client"] --> PR["Cloudflare private route"]
     PR --> H
 ```
@@ -26,7 +26,7 @@ limit-monitor/
   packages/
     shared/      # 契約 schema(zod/mini)、freshness/残量/最新値選択、Drizzle DB schema
     hub/         # Hono API server。Ingest/Status/health、token 管理 CLI、migration
-    client/      # Next.js App Router Dashboard
+    client/      # Vite + React + react-router Dashboard(SPA、Hub へ直接 CORS fetch)
     collector/   # mock collector(Codex/Claude fixture 送信)
   deploy/systemd/
   docs/
@@ -64,6 +64,22 @@ Ingest の保護:
 - token 認証失敗 401 / sourceId mismatch 403
 - sourceId 単位の in-memory fixed window rate limit(429)
 
+## CORS(ブラウザ直接アクセス)
+
+Dashboard は reverse proxy を介さず、ブラウザから Hub の API へ直接 fetch する SPA のため、
+Hub 側で CORS を明示的に許可する必要がある(`packages/hub/src/config.ts` の
+`resolveCorsAllowedOrigins`、`packages/hub/src/app.ts` の `cors()` middleware)。
+
+- 許可 origin は環境変数 `CORS_ALLOWED_ORIGINS`(カンマ区切り)で指定する
+- exact origin match のみを許可し、denied origin には
+  `Access-Control-Allow-Origin` を付けない(値は 200/204 のままヘッダーで拒否を表現する)
+- `local` / `test` では `CORS_ALLOWED_ORIGINS=*` を許容する(開発時の簡易設定)
+- `production`(`APP_ENV=production`)では `*` および未設定を fail closed で拒否し、
+  起動時に例外で落とす。**明示的な origin 一覧を必ず設定すること**
+  (例: `CORS_ALLOWED_ORIGINS=https://dashboard.example.com`)
+- Collector からの ingest リクエストのように `Origin` header がない場合は
+  CORS ヘッダーを付けない(CORS はブラウザ間のみの制約であり、Bearer token 認証とは独立)
+
 ## Freshness
 
 | 状態 | 条件 |
@@ -87,7 +103,7 @@ Dashboard では Hub 到達不能(`offline`)と `stale` を別表示する。
 
 ## Dashboard(packages/client)
 
-- Next.js App Router。データ取得は server component + server action(`actions.ts`)
+- Vite + React + react-router data-loader。データ取得はブラウザから Hub へ直接 fetch する
 - provider / accountAlias ごとのカード表示。bucket は固定 2 枠ではなく動的に描画
 - 残量主表示(「残り」と明記)、使用済み%、リセット日時(Asia/Tokyo)と相対時間、
   最終観測時刻、freshness、Hub 接続状態

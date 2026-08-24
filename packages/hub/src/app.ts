@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
-import { INGEST_RATE_LIMIT } from './config.js'
+import { cors } from 'hono/cors'
+import { CORS_ALLOWED_ORIGINS, INGEST_RATE_LIMIT } from './config.js'
 import type { Db } from './lib/database.js'
 import { accessLogMiddleware } from './lib/middleware.js'
 import type { RateLimiter } from './lib/rate-limit.js'
@@ -12,13 +13,18 @@ import * as status from './handlers/status/index.js'
 
 export function createApp({
   db,
-  rateLimiter = createRateLimiter(INGEST_RATE_LIMIT)
+  rateLimiter = createRateLimiter(INGEST_RATE_LIMIT),
+  corsAllowedOrigins = CORS_ALLOWED_ORIGINS
 }: {
   db: Db
   rateLimiter?: RateLimiter
+  corsAllowedOrigins?: string | string[]
 }) {
   const app = new Hono()
   app.use(accessLogMiddleware())
+  // ブラウザが Hub を直接叩く(reverse proxy なし)ための CORS。
+  // exact origin match のみ許可し、denied origin には Access-Control-Allow-Origin を付けない。
+  app.use('*', cors({ origin: corsAllowedOrigins }))
   app.onError(handleError)
   app.notFound((c) => {
     return c.json(
