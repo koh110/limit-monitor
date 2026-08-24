@@ -1,5 +1,6 @@
 import type { Context } from 'hono'
 import { HTTPException } from 'hono/http-exception'
+import type * as schema from 'shared/src/schema'
 import { logger } from './logger.js'
 
 export type ProblemDetails = {
@@ -49,12 +50,14 @@ export async function handleError(error: Error, c: Context) {
     meta: { requestId },
     error
   })
+  // 500 は個別 operation ではなく最終 fallback のため、契約は components の
+  // InternalServerError を直接参照する(media type は application/json)
   return c.json(
     {
       type: 'about:blank',
       title: 'Internal Server Error',
       status: 500
-    } satisfies ProblemDetails,
+    } satisfies schema.components['schemas']['InternalServerError'],
     500
   )
 }

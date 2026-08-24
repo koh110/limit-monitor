@@ -1,11 +1,14 @@
 import { randomUUID } from 'node:crypto'
 import { createMiddleware } from 'hono/factory'
+import type * as schema from 'shared/src/schema'
 import { verifyToken } from '../features/tokens/store.js'
 import type { Db } from './database.js'
 import { logger } from './logger.js'
 import type { RateLimiter } from './rate-limit.js'
-import type { ProblemDetails } from './wrap.js'
 import { createHttpException } from './wrap.js'
+
+// 401 / 429 を返すのは ingest route のみのため、契約もその operation を参照する
+type IngestResponse = schema.paths['/api/v1/observations']['post']['responses']
 
 declare module 'hono' {
   interface ContextVariableMap {
@@ -37,7 +40,7 @@ export function accessLogMiddleware() {
 }
 
 function unauthorized() {
-  return createHttpException<ProblemDetails>(401, {
+  return createHttpException<IngestResponse['401']['content']['application/problem+json']>(401, {
     type: 'about:blank',
     title: 'Unauthorized',
     status: 401,
@@ -75,7 +78,7 @@ export function ingestRateLimitMiddleware(limiter: RateLimiter) {
   return createMiddleware(async (c, next) => {
     const key = c.get('tokenSourceId')
     if (!limiter.check(key, Date.now())) {
-      throw createHttpException<ProblemDetails>(429, {
+      throw createHttpException<IngestResponse['429']['content']['application/problem+json']>(429, {
         type: 'about:blank',
         title: 'Too Many Requests',
         status: 429,

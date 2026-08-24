@@ -24,7 +24,8 @@ flowchart TD
 ```text
 limit-monitor/
   packages/
-    shared/      # 契約 schema(zod/mini)、freshness/残量/最新値選択、Drizzle DB schema
+    shared/      # API 契約(TypeSpec → OpenAPI → TS 型)、契約 schema(zod/mini)、
+                 # freshness/残量/最新値選択、Drizzle DB schema
     hub/         # Hono API server。Ingest/Status/health、token 管理 CLI、migration
     client/      # Vite + React + react-router Dashboard(SPA、Hub へ直接 CORS fetch)
     collector/   # mock collector(Codex/Claude fixture 送信)
@@ -46,6 +47,62 @@ limit-monitor/
 4. `latest_limits`(provider + account_alias + bucket_id が PK)へ upsert する
 5. Dashboard / Stream Deck は `GET /api/v1/status` を取得して表示する
 
+## API 契約(TypeSpec)
+
+API 契約の単一ソースは `packages/shared` の TypeSpec 定義である。
+
+```text
+packages/shared/
+  main.tsp                  # service 定義、共通 scalar、RFC 9457 エラーモデル
+  typespec/health.tsp       # /healthz, /readyz
+  typespec/status.tsp       # /api/v1/status, /api/v1/status/{provider}
+  typespec/observations.tsp # /api/v1/observations
+  tspconfig.yaml            # openapi3 emitter 設定(OpenAPI 3.1)
+  tsp-output/schema/openapi.yaml  # 中間生成物(git 管理しない)
+  src/generated/schema.ts   # openapi-typescript の生成型(git 管理しない)
+  src/schema.ts             # 生成型の re-export(`shared/src/schema`)
+```
+
+生成の流れ(`npm run build -w shared` の prebuild で自動実行される):
+
+```text
+main.tsp --(tsp compile)--> tsp-output/schema/openapi.yaml
+         --(openapi-typescript)--> src/generated/schema.ts
+```
+
+### 型と runtime 検証の役割分担
+
+- **型(compile time)**: TypeSpec 生成型。Hub の route path / validator の戻り値型 /
+  レスポンスを `satisfies` で契約に固定する
+- **runtime**: zod/mini(`packages/shared/src/contracts.ts`)。生成型は型情報しか
+  持たないため、実際の入力検証は従来どおり zod が行う
+- 両者の drift は `packages/shared/src/schema.test.ts` が型レベルで検出する
+  (zod 推論型と TypeSpec 生成型の相互代入可能性を tsc で強制する)
+- OpenAPIと生成型はbuild時に毎回生成するため、生成結果はgit管理しない。契約の変更は
+  TypeSpecソースと `schema.test.ts` の型検査でレビューする
+
+### 契約表現上の妥協点
+
+- `Observation.buckets` は TypeSpec 上も `unknown[]`(OpenAPI では `items: {}`)にしている。
+  bucket 単位の partial acceptance を行うため envelope 検証では中身を確定させず、各要素を
+  `observationBucketSchema` で個別に検証する実装をそのまま契約にした。1 要素の形は
+  `components['schemas']['ObservationBucket']` として別途公開している
+- Problem Details の `status` は各エラーモデルで数値リテラル(400 / 401 / ...)に固定している。
+  そのため `createHttpException<...>` の型引数がステータスと食い違うと tsc で落ちる
+
+### ルーティング型安全化の3点セット
+
+1. パス: `app.get('/api/v1/status' satisfies keyof schema.paths, ...)`
+2. レスポンス: `return c.json(res satisfies ...['responses']['200']['content']['application/json'])`
+3. validator の戻り値型注釈: `validator('json', (value): IngestApi['requestBody']['content']['application/json'] => ...)`
+
+3 が最も重要で、zod schema が契約とズレた場合に tsc が検出できる唯一のポイントになる。
+
+既知の限界: Hono はパスパラメータを `:provider` で表すが TypeSpec/OpenAPI は
+`{provider}` で表すため、`/api/v1/status/:provider` には `satisfies keyof schema.paths`
+を付けられない。この route は型側の参照
+(`schema.paths['/api/v1/status/{provider}']['get']`)で契約と紐付ける。
+
 ## Hub API
 
 | Method | Path | 認証 | 用途 |
@@ -56,7 +113,18 @@ limit-monitor/
 | GET | `/api/v1/status/:provider` | private network 制限 | provider 別状態 |
 | POST | `/api/v1/observations` | Collector Bearer Token | 観測値登録 |
 
-エラーレスポンスは RFC 9457 Problem Details 形式。
+エラーレスポンスは RFC 9457 Problem Details 形式。media type は経路によって異なり、
+契約(TypeSpec)側もこの実装の挙動に合わせている。
+
+| 経路 | status | Content-Type |
+| --- | --- | --- |
+| `createHttpException`(各 operation) | 400 / 401 / 403 / 413 / 429 | `application/problem+json` |
+| `app.notFound` | 404 | `application/json` |
+| `handleError` の最終 fallback | 500 | `application/json` |
+
+404 / 500 は個別 operation ではなく app 全体の fallback であり、`c.json()` で返すため
+`application/json` になる。契約上も `components['schemas']['NotFoundError']` /
+`InternalServerError` を直接参照する形にしている。
 
 Ingest の保護:
 

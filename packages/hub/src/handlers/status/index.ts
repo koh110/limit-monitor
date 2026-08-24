@@ -1,24 +1,31 @@
 import type { Hono } from 'hono'
 import { validator } from 'hono/validator'
-import type { Provider, StatusResponse } from 'shared/src/contracts'
 import { providerSchema } from 'shared/src/contracts'
+import type * as schema from 'shared/src/schema'
 import { getStatus } from '../../features/status/get.js'
 import type { Db } from '../../lib/database.js'
-import type { ProblemDetails } from '../../lib/wrap.js'
 import { createHttpException } from '../../lib/wrap.js'
 
+type GetStatusApi = schema.paths['/api/v1/status']['get']
+type GetStatusByProviderApi = schema.paths['/api/v1/status/{provider}']['get']
+type GetStatusByProviderResponse = GetStatusByProviderApi['responses']
+
 export function createRoute(app: Hono, db: Db) {
-  app.get('/api/v1/status', async (c) => {
+  app.get('/api/v1/status' satisfies keyof schema.paths, async (c) => {
     const res = await getStatus({ db, now: new Date() })
-    return c.json(res satisfies StatusResponse)
+    return c.json(res satisfies GetStatusApi['responses']['200']['content']['application/json'])
   })
 
+  // Hono はパスパラメータを `:provider` で表すが TypeSpec/OpenAPI は `{provider}` のため
+  // `satisfies keyof schema.paths` は使えない。型側の参照で契約と紐付ける
   app.get(
     '/api/v1/status/:provider',
-    validator('param', (value): { provider: Provider } => {
+    validator('param', (value): GetStatusByProviderApi['parameters']['path'] => {
       const parsed = providerSchema.safeParse(value.provider)
       if (!parsed.success) {
-        throw createHttpException<ProblemDetails>(400, {
+        throw createHttpException<
+          GetStatusByProviderResponse['400']['content']['application/problem+json']
+        >(400, {
           type: 'about:blank',
           title: 'Bad Request',
           status: 400,
@@ -30,7 +37,7 @@ export function createRoute(app: Hono, db: Db) {
     async (c) => {
       const { provider } = c.req.valid('param')
       const res = await getStatus({ db, now: new Date(), provider })
-      return c.json(res satisfies StatusResponse)
+      return c.json(res satisfies GetStatusByProviderResponse['200']['content']['application/json'])
     }
   )
 }

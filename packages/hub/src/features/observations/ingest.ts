@@ -1,11 +1,16 @@
 import { and, eq, inArray, sql } from 'drizzle-orm'
-import type { IngestResult, Observation, ObservationBucket } from 'shared/src/contracts'
+import type { ObservationBucket } from 'shared/src/contracts'
 import { SCHEMA_VERSION, observationBucketSchema } from 'shared/src/contracts'
 import { latestLimits } from 'shared/src/db/schema'
+import type * as schema from 'shared/src/schema'
 import { OBSERVED_AT_MAX_FUTURE_SKEW_MS, shouldReplaceLatest } from 'shared/src/selection'
 import type { Db } from '../../lib/database.js'
-import type { ProblemDetails } from '../../lib/wrap.js'
 import { createHttpException } from '../../lib/wrap.js'
+
+type IngestApi = schema.paths['/api/v1/observations']['post']
+type IngestResponse = IngestApi['responses']
+type Observation = IngestApi['requestBody']['content']['application/json']
+type IngestResult = IngestResponse['200']['content']['application/json']
 
 export async function ingestObservation({
   db,
@@ -22,7 +27,7 @@ export async function ingestObservation({
 }): Promise<IngestResult> {
   // token は対応する sourceId だけを書き込める(仕様 7.2、mismatch は 403)
   if (observation.sourceId !== tokenSourceId) {
-    throw createHttpException<ProblemDetails>(403, {
+    throw createHttpException<IngestResponse['403']['content']['application/problem+json']>(403, {
       type: 'about:blank',
       title: 'Forbidden',
       status: 403,
@@ -33,7 +38,7 @@ export async function ingestObservation({
   // accountAlias は認証 token 側が正。payload での明示は任意だが、
   // token と異なる accountAlias への書き込みは許可しない(403)
   if (observation.accountAlias !== undefined && observation.accountAlias !== tokenAccountAlias) {
-    throw createHttpException<ProblemDetails>(403, {
+    throw createHttpException<IngestResponse['403']['content']['application/problem+json']>(403, {
       type: 'about:blank',
       title: 'Forbidden',
       status: 403,
@@ -44,7 +49,7 @@ export async function ingestObservation({
 
   // Hub 時刻より 5 分以上未来の観測は拒否する(仕様 6.3)
   if (Date.parse(observation.observedAt) - now.getTime() > OBSERVED_AT_MAX_FUTURE_SKEW_MS) {
-    throw createHttpException<ProblemDetails>(400, {
+    throw createHttpException<IngestResponse['400']['content']['application/problem+json']>(400, {
       type: 'about:blank',
       title: 'Bad Request',
       status: 400,

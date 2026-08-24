@@ -9,21 +9,27 @@ Web Dashboard / Stream Deck / iPhone から確認するための基盤。
 
 | package | 役割 |
 | --- | --- |
-| `packages/shared` | Observation/Status の契約 schema、freshness/残量計算、Drizzle DB schema |
+| `packages/shared` | API 契約(TypeSpec)と生成型、Observation/Status の zod schema、freshness/残量計算、Drizzle DB schema |
 | `packages/hub` | Limit Hub。Hono + @hono/node-server。Ingest/Status API、SQLite 永続化 |
 | `packages/client` | Web Dashboard。Vite + React + react-router(data loader)。ブラウザから Hub へ直接 CORS 経由でアクセスする SPA |
 | `packages/collector` | Collector。Phase 1 では Codex/Claude fixture を送信する Linux mock collector |
 
 - ランタイム: Node.js 24.x
 - DB: SQLite(Node `node:sqlite`)+ Drizzle ORM(`drizzle-orm/node-sqlite`)
+- API 契約: TypeSpec → OpenAPI 3.1 → `openapi-typescript`(`packages/shared`)
 - ツールチェーン: npm workspaces + TypeScript + vite-plus(`vp test` / `vp fmt` / `vp lint`)
 
 ## セットアップ
 
 ```bash
 npm ci
-npm run build -w shared
+npm run build -w shared        # TypeSpec のコンパイルと型生成を含む
 ```
+
+依存を追加・更新するときは `npm install --force` を使う。`openapi-typescript@7` の
+peer が `typescript@^5.x` で本リポジトリの `typescript@6` と衝突するためで、
+`--legacy-peer-deps` は vite/rolldown の peer を落としてしまうので使わない。
+CI の `npm ci` は lockfile どおりに動くため影響を受けない。
 
 ### Hub の起動
 
@@ -59,6 +65,21 @@ Dashboard はブラウザから Hub へ直接 fetch する SPA(reverse proxy な
 build 時に焼き込まれる環境変数 `VITE_HUB_BASE_URL` で指定する(既定: `http://127.0.0.1:8787`)。
 Hub 側では、この Dashboard の origin を `CORS_ALLOWED_ORIGINS` に許可 origin として設定する必要がある
 (開発時の既定 origin は `http://localhost:5173`)。
+
+## API 契約(TypeSpec)
+
+API 契約の単一ソースは `packages/shared/main.tsp` と `packages/shared/typespec/*.tsp`。
+
+```bash
+npm run compile -w shared      # tsp compile(tsp-output/schema/openapi.yaml を生成)
+npm run openapi-ts -w shared   # OpenAPI から src/generated/schema.ts を生成
+npm run format-tsp -w shared   # *.tsp の整形(format の前段で自動実行)
+```
+
+`npm run build -w shared` の prebuild で上記の生成が自動実行される。生成型は
+`shared/src/schema` から参照し、Hub の route / validator / response を `satisfies` で
+契約に固定する。runtime の入力検証は従来どおり zod/mini(`shared/src/contracts`)が行う。
+詳細と既知の限界は `docs/architecture.md` を参照。
 
 ## 開発コマンド
 

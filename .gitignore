@@ -1,5 +1,7 @@
 node_modules/
 dist/
+tsp-output/
+packages/shared/src/generated/
 .next/
 .env
 *.sqlite

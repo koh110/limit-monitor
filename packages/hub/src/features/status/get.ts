@@ -1,9 +1,15 @@
 import { asc, eq } from 'drizzle-orm'
-import type { Provider, StatusAccount, StatusBucket, StatusResponse } from 'shared/src/contracts'
 import { SCHEMA_VERSION } from 'shared/src/contracts'
 import { latestLimits } from 'shared/src/db/schema'
 import { computeFreshness } from 'shared/src/freshness'
+import type * as schema from 'shared/src/schema'
 import type { Db } from '../../lib/database.js'
+
+type Provider = schema.components['schemas']['Provider']
+type StatusAccount = schema.components['schemas']['StatusAccount']
+type StatusBucket = schema.components['schemas']['StatusBucket']
+type StatusResponse =
+  schema.paths['/api/v1/status']['get']['responses']['200']['content']['application/json']
 
 export async function getStatus({
   db,
