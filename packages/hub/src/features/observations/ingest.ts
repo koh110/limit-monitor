@@ -11,11 +11,13 @@ export async function ingestObservation({
   db,
   observation,
   tokenSourceId,
+  tokenAccountAlias,
   now
 }: {
   db: Db
   observation: Observation
   tokenSourceId: string
+  tokenAccountAlias: string
   now: Date
 }): Promise<IngestResult> {
   // token は対応する sourceId だけを書き込める(仕様 7.2、mismatch は 403)
@@ -27,6 +29,18 @@ export async function ingestObservation({
       detail: `token is not allowed to write for sourceId "${observation.sourceId}"`
     })
   }
+
+  // accountAlias は認証 token 側が正。payload での明示は任意だが、
+  // token と異なる accountAlias への書き込みは許可しない(403)
+  if (observation.accountAlias !== undefined && observation.accountAlias !== tokenAccountAlias) {
+    throw createHttpException<ProblemDetails>(403, {
+      type: 'about:blank',
+      title: 'Forbidden',
+      status: 403,
+      detail: `token is not allowed to write for accountAlias "${observation.accountAlias}"`
+    })
+  }
+  const accountAlias = tokenAccountAlias
 
   // Hub 時刻より 5 分以上未来の観測は拒否する(仕様 6.3)
   if (Date.parse(observation.observedAt) - now.getTime() > OBSERVED_AT_MAX_FUTURE_SKEW_MS) {
@@ -73,7 +87,7 @@ export async function ingestObservation({
           .where(
             and(
               eq(latestLimits.provider, observation.provider),
-              eq(latestLimits.accountAlias, observation.accountAlias),
+              eq(latestLimits.accountAlias, accountAlias),
               inArray(
                 latestLimits.bucketId,
                 candidates.map((bucket) => {
@@ -103,7 +117,7 @@ export async function ingestObservation({
     accepted.push(bucket.bucketId)
     rowsToWrite.push({
       provider: observation.provider,
-      accountAlias: observation.accountAlias,
+      accountAlias,
       bucketId: bucket.bucketId,
       label: bucket.label,
       usedPercent: bucket.usedPercent,

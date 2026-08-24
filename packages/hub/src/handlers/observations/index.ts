@@ -49,6 +49,7 @@ export function createRoute(app: Hono, db: Db, rateLimiter: RateLimiter) {
         db,
         observation,
         tokenSourceId: c.get('tokenSourceId'),
+        tokenAccountAlias: c.get('tokenAccountAlias'),
         now: new Date()
       })
       return c.json(result satisfies IngestResult)

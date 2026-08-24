@@ -35,10 +35,11 @@ npm run dev:hub                    # http://0.0.0.0:8787
 ### Collector token の発行
 
 ```bash
-npm run tokens -w hub -- issue --source-id dev-machine
+npm run tokens -w hub -- issue --source-id dev-machine --account-alias main
 ```
 
-平文 token は発行時に 1 回だけ表示される。Hub には hash のみ保存される。
+`sourceId` と`accountAlias`の組み合わせごとにtokenを発行する。同じsourceで複数アカウントを収集する場合は、accountAliasごとに別tokenを発行する。
+平文 token は発行時に1回だけ表示され、Hubにはhashのみ保存される。accountAliasはtokenからHub側で確定するため、collector側の設定は不要。
 
 ### mock collector の実行(Phase 1)
 

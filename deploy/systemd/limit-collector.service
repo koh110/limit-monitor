@@ -13,9 +13,9 @@ User=limit-monitor
 Group=limit-monitor
 WorkingDirectory=/opt/limit-monitor/packages/collector
 Environment=HUB_URL=http://127.0.0.1:8787
-# token を発行した sourceId と一致させる(hostname を自動送信しない)
+# token を発行した sourceId と一致させる(hostname を自動送信しない)。
+# accountAlias は token 発行時にHubへ紐付くため、collector側では設定しない。
 Environment=SOURCE_ID=dev-machine
-Environment=ACCOUNT_ALIAS=default
 Environment=COLLECTOR_INTERVAL_SECONDS=60
 Environment=COLLECTOR_PROVIDERS=codex,claude
 LoadCredential=hub-token:/etc/limit-monitor/collector-token

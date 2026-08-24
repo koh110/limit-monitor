@@ -4,8 +4,8 @@
  * 実行前に `npm run build -w hub` が必要(pretokens で自動実行される)。
  *
  * Usage:
- *   npm run tokens -w hub -- issue --source-id dev-machine
- *   npm run tokens -w hub -- revoke --source-id dev-machine
+ *   npm run tokens -w hub -- issue --source-id dev-machine --account-alias main
+ *   npm run tokens -w hub -- revoke --source-id dev-machine --account-alias main
  *   npm run tokens -w hub -- list
  */
 import { parseArgs } from 'node:util'
@@ -16,6 +16,9 @@ import { createDb } from '../dist/src/lib/database.js'
 const { values, positionals } = parseArgs({
   options: {
     'source-id': {
+      type: 'string'
+    },
+    'account-alias': {
       type: 'string'
     },
     help: {
@@ -31,15 +34,17 @@ function showHelp() {
   console.log(`Usage: tokens <command> [options]
 
 Commands:
-  issue --source-id <id>   Issue (or reissue) a collector token
-  revoke --source-id <id>  Revoke the token for a sourceId
-  list                     List sourceIds and token states
+  issue --source-id <id> --account-alias <alias>   Issue (or reissue) a collector token
+  revoke --source-id <id> --account-alias <alias>  Revoke the token for a sourceId + accountAlias
+  list                                             List tokens and their states
 
 Options:
   -h, --help  Show this help message
 
-The plaintext token is printed only once on issue. Store it in the
-collector host's secret store (systemd credentials / 1Password).`)
+A token is bound to a sourceId + accountAlias pair. One sourceId can hold
+multiple tokens with different accountAliases. The plaintext token is printed
+only once on issue. Store it in the collector host's secret store
+(systemd credentials / 1Password).`)
 }
 
 async function main() {
@@ -52,23 +57,26 @@ async function main() {
   const db = createDb(DB_FILE_PATH)
 
   if (command === 'issue') {
-    const sourceId = requireSourceId()
-    const issued = await issueToken({ db, sourceId, now: new Date() })
-    console.log(`sourceId: ${issued.sourceId}`)
-    console.log(`token:    ${issued.token}`)
+    const sourceId = requireOption('source-id')
+    const accountAlias = requireOption('account-alias')
+    const issued = await issueToken({ db, sourceId, accountAlias, now: new Date() })
+    console.log(`sourceId:     ${issued.sourceId}`)
+    console.log(`accountAlias: ${issued.accountAlias}`)
+    console.log(`token:        ${issued.token}`)
     console.log('(this token is shown only once; only its hash is stored)')
     return
   }
 
   if (command === 'revoke') {
-    const sourceId = requireSourceId()
-    const revoked = await revokeToken({ db, sourceId, now: new Date() })
+    const sourceId = requireOption('source-id')
+    const accountAlias = requireOption('account-alias')
+    const revoked = await revokeToken({ db, sourceId, accountAlias, now: new Date() })
     if (!revoked) {
-      console.error(`no token found for sourceId: ${sourceId}`)
+      console.error(`no token found for sourceId: ${sourceId}, accountAlias: ${accountAlias}`)
       process.exitCode = 1
       return
     }
-    console.log(`revoked: ${sourceId}`)
+    console.log(`revoked: ${sourceId} (${accountAlias})`)
     return
   }
 
@@ -80,7 +88,9 @@ async function main() {
     }
     for (const token of tokens) {
       const state = token.revokedAt ? `revoked at ${token.revokedAt}` : 'active'
-      console.log(`${token.sourceId}\tcreated at ${token.createdAt}\t${state}`)
+      console.log(
+        `${token.sourceId}\t${token.accountAlias}\tcreated at ${token.createdAt}\t${state}`
+      )
     }
     return
   }
@@ -90,13 +100,13 @@ async function main() {
   process.exitCode = 1
 }
 
-function requireSourceId(): string {
-  const sourceId = values['source-id']
-  if (!sourceId) {
-    console.error('--source-id is required')
+function requireOption(name: 'source-id' | 'account-alias'): string {
+  const value = values[name]
+  if (!value) {
+    console.error(`--${name} is required`)
     process.exit(1)
   }
-  return sourceId
+  return value
 }
 
 main().catch((err) => {

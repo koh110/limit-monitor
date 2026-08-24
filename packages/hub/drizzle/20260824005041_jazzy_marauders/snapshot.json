@@ -1,0 +1,219 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "id": "c80c90a8-40b6-4614-96ea-e7ab2a6b6b54",
+  "prevIds": [
+    "00000000-0000-0000-0000-000000000000"
+  ],
+  "ddl": [
+    {
+      "name": "collector_tokens",
+      "entityType": "tables"
+    },
+    {
+      "name": "latest_limits",
+      "entityType": "tables"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "source_id",
+      "entityType": "columns",
+      "table": "collector_tokens"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "account_alias",
+      "entityType": "columns",
+      "table": "collector_tokens"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "token_hash",
+      "entityType": "columns",
+      "table": "collector_tokens"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "collector_tokens"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "revoked_at",
+      "entityType": "columns",
+      "table": "collector_tokens"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "provider",
+      "entityType": "columns",
+      "table": "latest_limits"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "account_alias",
+      "entityType": "columns",
+      "table": "latest_limits"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "bucket_id",
+      "entityType": "columns",
+      "table": "latest_limits"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "label",
+      "entityType": "columns",
+      "table": "latest_limits"
+    },
+    {
+      "type": "real",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "used_percent",
+      "entityType": "columns",
+      "table": "latest_limits"
+    },
+    {
+      "type": "real",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "remaining_percent",
+      "entityType": "columns",
+      "table": "latest_limits"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "window_duration_seconds",
+      "entityType": "columns",
+      "table": "latest_limits"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "resets_at",
+      "entityType": "columns",
+      "table": "latest_limits"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "observed_at",
+      "entityType": "columns",
+      "table": "latest_limits"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "received_at",
+      "entityType": "columns",
+      "table": "latest_limits"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "source_id",
+      "entityType": "columns",
+      "table": "latest_limits"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "false",
+      "generated": null,
+      "name": "reached",
+      "entityType": "columns",
+      "table": "latest_limits"
+    },
+    {
+      "columns": [
+        "source_id",
+        "account_alias"
+      ],
+      "nameExplicit": false,
+      "name": "collector_tokens_pk",
+      "entityType": "pks",
+      "table": "collector_tokens"
+    },
+    {
+      "columns": [
+        "provider",
+        "account_alias",
+        "bucket_id"
+      ],
+      "nameExplicit": false,
+      "name": "latest_limits_pk",
+      "entityType": "pks",
+      "table": "latest_limits"
+    },
+    {
+      "columns": [
+        "token_hash"
+      ],
+      "nameExplicit": false,
+      "name": "collector_tokens_token_hash_unique",
+      "entityType": "uniques",
+      "table": "collector_tokens"
+    }
+  ],
+  "renames": []
+}

@@ -39,11 +39,13 @@ export type ObservationBucket = z.infer<typeof observationBucketSchema>
 
 // buckets は envelope 検証では中身を確定させない(不正な bucket が 1 件あっても
 // 他の正常 bucket を破棄しない = bucket 単位の partial acceptance を行うため)。
-// 各要素は ingest 側で observationBucketSchema により個別に検証する
+// 各要素は ingest 側で observationBucketSchema により個別に検証する。
+// accountAlias は認証 token 側が正とするため optional(明示した場合は
+// token の accountAlias と一致しなければ Hub が 403 で拒否する)
 export const observationSchema = z.object({
   schemaVersion: z.literal(SCHEMA_VERSION),
   provider: providerSchema,
-  accountAlias: accountAliasSchema,
+  accountAlias: z.optional(accountAliasSchema),
   sourceId: sourceIdSchema,
   observedAt: isoDateTimeSchema,
   buckets: z.array(z.unknown()).check(z.minLength(1), z.maxLength(MAX_BUCKETS_PER_OBSERVATION)),

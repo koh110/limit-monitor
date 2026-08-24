@@ -3,7 +3,6 @@ import type { Observation } from 'shared/src/contracts'
 import { buildClaudeObservation } from './adapters/claude.js'
 import { buildCodexObservation } from './adapters/codex.js'
 import {
-  ACCOUNT_ALIAS,
   HUB_TOKEN,
   HUB_TOKEN_FILE,
   HUB_URL,
@@ -34,7 +33,6 @@ function buildObservations(now: Date): Observation[] {
   if (PROVIDERS.includes('codex')) {
     const observation = buildCodexObservation({
       payload: createCodexFixture(now),
-      accountAlias: ACCOUNT_ALIAS,
       sourceId: SOURCE_ID,
       observedAt
     })
@@ -45,7 +43,6 @@ function buildObservations(now: Date): Observation[] {
   if (PROVIDERS.includes('claude')) {
     const observation = buildClaudeObservation({
       statusLine: createClaudeFixture(now),
-      accountAlias: ACCOUNT_ALIAS,
       sourceId: SOURCE_ID,
       observedAt
     })
@@ -69,7 +66,6 @@ async function collectAndSend(token: string) {
         body: `${observation.provider} observation sent`,
         meta: {
           provider: observation.provider,
-          accountAlias: observation.accountAlias,
           accepted: result.body.accepted,
           skipped: result.body.skipped,
           rejected: result.body.rejected
@@ -92,7 +88,6 @@ async function main() {
     body: `mock collector sending to ${HUB_URL}`,
     meta: {
       sourceId: SOURCE_ID,
-      accountAlias: ACCOUNT_ALIAS,
       providers: PROVIDERS,
       intervalSeconds: INTERVAL_SECONDS
     }

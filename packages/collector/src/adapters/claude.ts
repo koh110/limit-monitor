@@ -45,12 +45,10 @@ function clampPercent(value: number): number {
  */
 export function buildClaudeObservation({
   statusLine,
-  accountAlias,
   sourceId,
   observedAt
 }: {
   statusLine: ClaudeStatusLineInput
-  accountAlias: string
   sourceId: string
   observedAt: string
 }): Observation | null {
@@ -82,10 +80,10 @@ export function buildClaudeObservation({
     return null
   }
 
+  // accountAlias は送らない。Hub が認証 token の accountAlias で正規化する
   return {
     schemaVersion: 1,
     provider: 'claude',
-    accountAlias,
     sourceId,
     observedAt,
     buckets

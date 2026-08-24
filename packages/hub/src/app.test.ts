@@ -114,8 +114,8 @@ test('未登録 token は 401', async () => {
 test('失効した token は 401', async () => {
   const { db, cleanup } = createTestDb()
   const app = createApp({ db })
-  const issued = await issueToken({ db, sourceId: 'dev-machine', now })
-  await revokeToken({ db, sourceId: 'dev-machine', now })
+  const issued = await issueToken({ db, sourceId: 'dev-machine', accountAlias: 'default', now })
+  await revokeToken({ db, sourceId: 'dev-machine', accountAlias: 'default', now })
   const res = await postObservation({
     app,
     token: issued.token,
@@ -128,7 +128,7 @@ test('失効した token は 401', async () => {
 test('token の sourceId と異なる sourceId への書き込みは 403', async () => {
   const { db, cleanup } = createTestDb()
   const app = createApp({ db })
-  const issued = await issueToken({ db, sourceId: 'dev-machine', now })
+  const issued = await issueToken({ db, sourceId: 'dev-machine', accountAlias: 'default', now })
   const res = await postObservation({
     app,
     token: issued.token,
@@ -141,7 +141,7 @@ test('token の sourceId と異なる sourceId への書き込みは 403', async
 test('envelope が不正な payload は 400', async () => {
   const { db, cleanup } = createTestDb()
   const app = createApp({ db })
-  const issued = await issueToken({ db, sourceId: 'dev-machine', now })
+  const issued = await issueToken({ db, sourceId: 'dev-machine', accountAlias: 'default', now })
   const res = await postObservation({
     app,
     token: issued.token,
@@ -156,7 +156,7 @@ test('envelope が不正な payload は 400', async () => {
 test('body limit を超えるリクエストは 413', async () => {
   const { db, cleanup } = createTestDb()
   const app = createApp({ db })
-  const issued = await issueToken({ db, sourceId: 'dev-machine', now })
+  const issued = await issueToken({ db, sourceId: 'dev-machine', accountAlias: 'default', now })
   const res = await postObservation({
     app,
     token: issued.token,
@@ -175,7 +175,7 @@ test('rate limit を超えた ingest は 429', async () => {
     db,
     rateLimiter: createRateLimiter({ windowMs: 60_000, max: 1 })
   })
-  const issued = await issueToken({ db, sourceId: 'dev-machine', now })
+  const issued = await issueToken({ db, sourceId: 'dev-machine', accountAlias: 'default', now })
   const first = await postObservation({
     app,
     token: issued.token,
@@ -194,11 +194,11 @@ test('rate limit を超えた ingest は 429', async () => {
 test('正常な ingest 後に status API へ反映される', async () => {
   const { db, cleanup } = createTestDb()
   const app = createApp({ db })
-  const issued = await issueToken({ db, sourceId: 'dev-machine', now })
+  const issued = await issueToken({ db, sourceId: 'dev-machine', accountAlias: 'default', now })
   const posted = await postObservation({
     app,
     token: issued.token,
-    payload: createPayload()
+    payload: createPayload({ accountAlias: undefined })
   })
   expect(posted.status).toBe(200)
   const ingestResult = ingestResultSchema.parse(await posted.json())
@@ -219,7 +219,7 @@ test('正常な ingest 後に status API へ反映される', async () => {
 test('provider 別 status API は対象 provider のみ返す', async () => {
   const { db, cleanup } = createTestDb()
   const app = createApp({ db })
-  const issued = await issueToken({ db, sourceId: 'dev-machine', now })
+  const issued = await issueToken({ db, sourceId: 'dev-machine', accountAlias: 'default', now })
   await postObservation({
     app,
     token: issued.token,

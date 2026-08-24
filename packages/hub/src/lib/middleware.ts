@@ -10,8 +10,9 @@ import { createHttpException } from './wrap.js'
 declare module 'hono' {
   interface ContextVariableMap {
     requestId: string
-    // collector token 認証済みの書き込み許可 sourceId
+    // collector token 認証済みの書き込み許可 sourceId / accountAlias
     tokenSourceId: string
+    tokenAccountAlias: string
   }
 }
 
@@ -64,6 +65,7 @@ export function collectorAuthMiddleware(db: Db) {
       throw unauthorized()
     }
     c.set('tokenSourceId', verified.sourceId)
+    c.set('tokenAccountAlias', verified.accountAlias)
     // next() は try の外で呼ぶ(下流の例外を 401 に変換しない)
     await next()
   })

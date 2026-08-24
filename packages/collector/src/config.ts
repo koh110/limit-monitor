@@ -8,8 +8,8 @@ export const HUB_TOKEN_FILE = process.env.HUB_TOKEN_FILE ?? null
 // 人間が設定する端末別名(hostname の自動送信はしない。仕様 6.2)
 export const SOURCE_ID = process.env.SOURCE_ID ?? 'mock-dev'
 
-// 人間が設定する非機密のアカウント別名(生のアカウントIDは禁止。仕様 6.2)
-export const ACCOUNT_ALIAS = process.env.ACCOUNT_ALIAS ?? 'default'
+// accountAlias は collector では設定しない。Hub が認証 token に紐づく
+// accountAlias を採用して正規化する
 
 // 0 なら 1 回送信して終了する
 export const INTERVAL_SECONDS = process.env.COLLECTOR_INTERVAL_SECONDS

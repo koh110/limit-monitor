@@ -50,12 +50,10 @@ function clampPercent(value: number): number {
  */
 export function buildCodexObservation({
   payload,
-  accountAlias,
   sourceId,
   observedAt
 }: {
   payload: CodexRateLimitsPayload
-  accountAlias: string
   sourceId: string
   observedAt: string
 }): Observation | null {
@@ -99,10 +97,10 @@ export function buildCodexObservation({
     return null
   }
 
+  // accountAlias は送らない。Hub が認証 token の accountAlias で正規化する
   return {
     schemaVersion: 1,
     provider: 'codex',
-    accountAlias,
     sourceId,
     observedAt,
     buckets

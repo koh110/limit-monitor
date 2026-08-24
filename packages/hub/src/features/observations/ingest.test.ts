@@ -7,11 +7,11 @@ import { ingestObservation } from './ingest.js'
 
 const now = new Date('2026-08-23T04:10:00.000Z')
 
+// collector は accountAlias を送らない(Hub が token の accountAlias で正規化する)
 function createObservation(overrides: Partial<Observation> = {}): Observation {
   return {
     schemaVersion: 1,
     provider: 'codex',
-    accountAlias: 'default',
     sourceId: 'dev-machine',
     observedAt: '2026-08-23T04:00:00.000Z',
     buckets: [
@@ -42,6 +42,7 @@ test('token の sourceId と payload の sourceId が一致しない場合は 40
     db,
     observation: createObservation({ sourceId: 'other-machine' }),
     tokenSourceId: 'dev-machine',
+    tokenAccountAlias: 'default',
     now
   }).catch((err: unknown) => {
     return err
@@ -63,6 +64,7 @@ test('Hub 時刻より 5 分以上未来の observedAt は 400 で拒否する',
       observedAt: '2026-08-23T04:16:00.000Z'
     }),
     tokenSourceId: 'dev-machine',
+    tokenAccountAlias: 'default',
     now
   }).catch((err: unknown) => {
     return err
@@ -83,6 +85,7 @@ test('5 分未満の未来 observedAt は clock skew として受理する', asy
       observedAt: '2026-08-23T04:14:00.000Z'
     }),
     tokenSourceId: 'dev-machine',
+    tokenAccountAlias: 'default',
     now
   })
   expect(result.accepted).toEqual(['codex:primary'])
@@ -105,6 +108,7 @@ test('古い観測値の遅延到着は最新値を上書きしない', async ()
       ]
     }),
     tokenSourceId: 'dev-machine',
+    tokenAccountAlias: 'default',
     now
   })
 
@@ -122,6 +126,7 @@ test('古い観測値の遅延到着は最新値を上書きしない', async ()
       ]
     }),
     tokenSourceId: 'dev-machine',
+    tokenAccountAlias: 'default',
     now: new Date('2026-08-23T04:11:00.000Z')
   })
 
@@ -150,6 +155,7 @@ test('observedAt が同一時刻なら新しい receivedAt を採用する', asy
       ]
     }),
     tokenSourceId: 'dev-machine',
+    tokenAccountAlias: 'default',
     now
   })
 
@@ -168,6 +174,7 @@ test('observedAt が同一時刻なら新しい receivedAt を採用する', asy
       ]
     }),
     tokenSourceId: 'laptop',
+    tokenAccountAlias: 'default',
     now: new Date('2026-08-23T04:11:00.000Z')
   })
 
@@ -198,6 +205,7 @@ test('不正な bucket があっても他の正常 bucket は受理する(partia
       ]
     }),
     tokenSourceId: 'dev-machine',
+    tokenAccountAlias: 'default',
     now
   })
 
@@ -226,6 +234,7 @@ test('bucket の未知フィールドは互換性のため無視して受理す�
       ]
     }),
     tokenSourceId: 'dev-machine',
+    tokenAccountAlias: 'default',
     now
   })
   expect(result.accepted).toEqual(['codex:primary'])
@@ -233,18 +242,20 @@ test('bucket の未知フィールドは互換性のため無視して受理す�
   cleanup()
 })
 
-test('accountAlias が異なれば同じ bucketId でも別レコードとして保持する', async () => {
+test('token の accountAlias が異なれば同じ bucketId でも別レコードとして保持する', async () => {
   const { db, cleanup } = createTestDb()
   await ingestObservation({
     db,
-    observation: createObservation({ accountAlias: 'main' }),
+    observation: createObservation(),
     tokenSourceId: 'dev-machine',
+    tokenAccountAlias: 'main',
     now
   })
   await ingestObservation({
     db,
-    observation: createObservation({ accountAlias: 'sub' }),
+    observation: createObservation(),
     tokenSourceId: 'dev-machine',
+    tokenAccountAlias: 'sub',
     now
   })
 
@@ -254,5 +265,54 @@ test('accountAlias が異なれば同じ bucketId でも別レコードとして
       return account.accountAlias
     })
   ).toEqual(['main', 'sub'])
+  cleanup()
+})
+
+test('payload に accountAlias がなくても token の accountAlias で保存する', async () => {
+  const { db, cleanup } = createTestDb()
+  const result = await ingestObservation({
+    db,
+    observation: createObservation(),
+    tokenSourceId: 'dev-machine',
+    tokenAccountAlias: 'main',
+    now
+  })
+  expect(result.accepted).toEqual(['codex:primary'])
+
+  const status = await getStatus({ db, now })
+  expect(status.accounts.length).toBe(1)
+  expect(status.accounts[0]?.accountAlias).toBe('main')
+  cleanup()
+})
+
+test('payload の accountAlias が token の accountAlias と一致すれば受理する', async () => {
+  const { db, cleanup } = createTestDb()
+  const result = await ingestObservation({
+    db,
+    observation: createObservation({ accountAlias: 'main' }),
+    tokenSourceId: 'dev-machine',
+    tokenAccountAlias: 'main',
+    now
+  })
+  expect(result.accepted).toEqual(['codex:primary'])
+  cleanup()
+})
+
+test('payload の accountAlias が token の accountAlias と一致しない場合は 403', async () => {
+  const { db, cleanup } = createTestDb()
+  const error = await ingestObservation({
+    db,
+    observation: createObservation({ accountAlias: 'other-account' }),
+    tokenSourceId: 'dev-machine',
+    tokenAccountAlias: 'main',
+    now
+  }).catch((err: unknown) => {
+    return err
+  })
+  expect(error).toBeInstanceOf(HTTPException)
+  if (error instanceof HTTPException) {
+    expect(error.status).toBe(403)
+  }
+  expect(await statusBuckets(db)).toEqual([])
   cleanup()
 })

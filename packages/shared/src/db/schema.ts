@@ -27,9 +27,22 @@ export const latestLimits = sqliteTable(
   }
 )
 
-export const collectorTokens = sqliteTable('collector_tokens', {
-  sourceId: text('source_id').primaryKey(),
-  tokenHash: text('token_hash').notNull(),
-  createdAt: text('created_at').notNull(),
-  revokedAt: text('revoked_at')
-})
+// token は sourceId + accountAlias の組に紐づく。1 つの sourceId が複数の
+// accountAlias(= 複数アカウント)の token を持てる(仕様 7.2)
+export const collectorTokens = sqliteTable(
+  'collector_tokens',
+  {
+    sourceId: text('source_id').notNull(),
+    accountAlias: text('account_alias').notNull(),
+    tokenHash: text('token_hash').notNull().unique(),
+    createdAt: text('created_at').notNull(),
+    revokedAt: text('revoked_at')
+  },
+  (table) => {
+    return [
+      primaryKey({
+        columns: [table.sourceId, table.accountAlias]
+      })
+    ]
+  }
+)
