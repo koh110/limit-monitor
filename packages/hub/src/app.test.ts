@@ -138,6 +138,19 @@ test('token の sourceId と異なる sourceId への書き込みは 403', async
   cleanup()
 })
 
+test('token の accountAlias と異なる accountAlias への書き込みは 403', async () => {
+  const { db, cleanup } = createTestDb()
+  const app = createApp({ db })
+  const issued = await issueToken({ db, sourceId: 'dev-machine', accountAlias: 'main', now })
+  const res = await postObservation({
+    app,
+    token: issued.token,
+    payload: createPayload({ accountAlias: 'other-account' })
+  })
+  expect(res.status).toBe(403)
+  cleanup()
+})
+
 test('envelope が不正な payload は 400', async () => {
   const { db, cleanup } = createTestDb()
   const app = createApp({ db })
