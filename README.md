@@ -75,16 +75,13 @@ COLLECTOR_MODE=mock HUB_TOKEN=<token> SOURCE_ID=<source-id> \
 
 ```bash
 # Hub + Dashboard
-VITE_HUB_BASE_URL=http://127.0.0.1:8787 \
-  sudo -E ./deploy.ts --server
+sudo ./deploy.ts --server --hub-base-url http://127.0.0.1:8787
 
 # Collector
-VITE_HUB_BASE_URL=http://127.0.0.1:8787 \
-  sudo -E ./deploy.ts --collector
+sudo ./deploy.ts --collector --hub-base-url http://127.0.0.1:8787
 
 # 全サービス
-VITE_HUB_BASE_URL=http://127.0.0.1:8787 \
-  sudo -E ./deploy.ts --server --collector
+sudo ./deploy.ts --server --hub-base-url http://127.0.0.1:8787 --collector
 ```
 
 `--server`はHubとDashboard、`--collector`はCollectorを対象にします。何も指定しない場合や未知の引数は失敗します。
@@ -97,8 +94,7 @@ Deployを実行した通常ユーザーが、3サービスのsystemd実行ユー
 VITE_HUB_BASE_URL=http://127.0.0.1:8787 \
   ./deploy/deploy.sh --prepare-build
 
-VITE_HUB_BASE_URL=http://127.0.0.1:8787 \
-  sudo -E ./deploy.ts --server --collector
+sudo ./deploy.ts --server --hub-base-url http://127.0.0.1:8787 --collector
 ```
 
 Collectorをdeployする場合、同じinstallユーザーでCodex / Claude CLIへlogin済みである必要があります。既存のenv、token、手編集されたsystemd unitはdeployで黙って上書きしません。

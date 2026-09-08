@@ -39,6 +39,14 @@ test('deploy.ts: --collector は collector だけを deploy.sh へ委譲する',
   expect(res.out.trim()).toBe(`bash ${DEPLOY_SH_PATH} --install-systemd --services collector`)
 })
 
+test('deploy.ts: --hub-base-url はsudoの環境保持に依存せず委譲する', () => {
+  const res = runDeployTs(['--server', '--hub-base-url', 'http://127.0.0.1:8787', '--dry-run'])
+  expect(res.code, res.err).toBe(0)
+  expect(res.out.trim()).toBe(
+    `bash ${DEPLOY_SH_PATH} --install-systemd --services server --hub-base-url http://127.0.0.1:8787`
+  )
+})
+
 test('deploy.ts: --server --collector は選択順によらず canonical 順で渡す', () => {
   const forward = runDeployTs(['--server', '--collector', '--dry-run'], HUB_URL_ENV)
   const reversed = runDeployTs(['--collector', '--server', '--dry-run'], HUB_URL_ENV)
@@ -164,7 +172,7 @@ test('deploy.ts: 非 root では systemd install を実行せず案内して停�
   const res = runDeployTs(['--server'], HUB_URL_ENV)
   expect(res.code).not.toBe(0)
   expect(res.err).toContain('systemd install requires root')
-  expect(res.err).toContain('sudo -E ./deploy.ts')
+  expect(res.err).toContain('sudo ./deploy.ts --hub-base-url <url>')
 })
 
 // ---- deploy.sh: install identity / services 選択の実挙動 ----
@@ -256,12 +264,7 @@ function runResolveIdentity(opts: {
 }
 
 /** 実在する home を持つ passwd 行を組み立てる(home 存在チェックを通すため) */
-function passwdLine(
-  user: string,
-  uid: number,
-  gid: number,
-  home: string = os.tmpdir()
-): string {
+function passwdLine(user: string, uid: number, gid: number, home: string = os.tmpdir()): string {
   return `${user}:x:${uid}:${gid}::${home}:/bin/bash`
 }
 
@@ -309,7 +312,7 @@ test('identity: root 直接(SUDO_USER 無し)は fail-closed', () => {
   expect(res.err).toContain('cannot determine the install user')
   // 廃止した option を案内しない(利用者に user 指定を求めない)
   expect(res.err).not.toContain('--user')
-  expect(res.err).toContain('sudo -E ./deploy.ts')
+  expect(res.err).toContain('sudo ./deploy.ts --hub-base-url <url>')
   expect(res.out).not.toContain('IDENTITY=')
 })
 
@@ -375,7 +378,6 @@ test('identity: shell metacharacter を含む名前は unit へ渡す前に拒�
   }
 })
 
-
 /** resolve_selected_services を DEPLOY_SERVICES 値に対して実行する */
 function runSelectServices(services: string): { code: number; out: string; err: string } {
   return runBashHarness([
@@ -403,13 +405,17 @@ test('services: server は hub + dashboard、collector は collector unit を選
   const both = runSelectServices('collector,server')
   expect(both.code, both.err).toBe(0)
   // 選択順によらず hub -> dashboard -> collector の順で反映する
-  expect(both.out).toContain('UNITS=limit-hub.service limit-dashboard.service limit-collector.service ')
+  expect(both.out).toContain(
+    'UNITS=limit-hub.service limit-dashboard.service limit-collector.service '
+  )
 })
 
 test('services: 前後空白は trim して受理する', () => {
   const res = runSelectServices(' server , collector ')
   expect(res.code, res.err).toBe(0)
-  expect(res.out).toContain('UNITS=limit-hub.service limit-dashboard.service limit-collector.service ')
+  expect(res.out).toContain(
+    'UNITS=limit-hub.service limit-dashboard.service limit-collector.service '
+  )
 })
 
 test('services: 空 / 空要素 / 重複 / 未知値は fail-closed', () => {

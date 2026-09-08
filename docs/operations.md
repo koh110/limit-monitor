@@ -31,9 +31,9 @@ systemd unit と Node.js dashboard service は常に `current` を参照する�
 利用者向けの入口はリポジトリ root の `./deploy.ts` だけで、対象サービスを明示する:
 
 ```bash
-sudo -E ./deploy.ts --server              # Hub + Dashboard
-sudo -E ./deploy.ts --collector           # Collector
-sudo -E ./deploy.ts --server --collector  # 全サービス
+sudo ./deploy.ts --hub-base-url <url> --server              # Hub + Dashboard
+sudo ./deploy.ts --hub-base-url <url> --collector           # Collector
+sudo ./deploy.ts --hub-base-url <url> --server --collector  # 全サービス
 ```
 
 ```bash
@@ -43,7 +43,7 @@ git pull
 # build は分離して先に非 root ユーザーで行う(推奨。script が stale build を検出したら
 # SUDO_USER として自動再実行するが、SUDO_USER 無い root シェルでは fail-closed):
 #   VITE_HUB_BASE_URL=http://limit-monitor.local:8787 deploy/deploy.sh --prepare-build
-VITE_HUB_BASE_URL=http://limit-monitor.local:8787 sudo -E ./deploy.ts --server --collector
+VITE_HUB_BASE_URL=http://limit-monitor.local:8787 sudo ./deploy.ts --hub-base-url <url> --server --collector
 ```
 
 `--server` / `--collector` のどちらも指定しなければ何も deploy しない(fail-closed)。
@@ -69,7 +69,7 @@ VITE_HUB_BASE_URL=http://limit-monitor.local:8787 \
 Collector の 3 unit、`/var/lib/limit-monitor` の owner、Hub token CLI の実行
 identity はすべて **install を実行した通常ユーザー** に揃える。解決順:
 
-1. `sudo -E` 経由なら `SUDO_USER`(root 以外の実ユーザー)
+1. `sudo` 経由なら `SUDO_USER`(root 以外の実ユーザー)
 2. 非 root 実行なら現在のユーザー(systemd 操作には root が必要なため、その先で
    root チェックに掛かり「sudo で実行し直す」案内が出る)
 3. root 直接で `SUDO_USER` が無い場合は主体不明として **fail-closed**
@@ -93,7 +93,7 @@ HOME 配下の login 情報を読むため)。
 | `KEEP_RELEASES` / `--keep-releases` | `5` | 残す過去 release 数(1 以上) |
 | `DEPLOY_RESTART` / `--restart` | `0`(再起動しない) | systemd service を再起動する |
 | `DEPLOY_INSTALL_SYSTEMD` / `--install-systemd` | `0` | unit render・検証・配置、daemon-reload、enable/start/restart を行う |
-| `DEPLOY_PREPARE_BUILD` / `--prepare-build` | - | 非 root のみ。`npm ci` + 全 workspace build + `VITE_HUB_BASE_URL` での Dashboard build + build manifest 生成で終了(staging / systemd なし)。root では die。`sudo -E` + `--install-systemd` 実行時は script が先に SUDO_USER として自動再実行する |
+| `DEPLOY_PREPARE_BUILD` / `--prepare-build` | - | 非 root のみ。`npm ci` + 全 workspace build + `VITE_HUB_BASE_URL` での Dashboard build + build manifest 生成で終了(staging / systemd なし)。root では die。`sudo` + `--install-systemd` 実行時は script が先に SUDO_USER として自動再実行する |
 | `DEPLOY_SERVICES` / `--services` | `server,collector` | 対象サービス(`server` = hub + dashboard、`collector`)。`./deploy.ts` は `--server` / `--collector` から明示的に渡す。空 / 未知 / 重複は fail-closed |
 | `SKIP_NPM_CI` / `--skip-npm-ci` | `0` | `npm ci` を省略する |
 | `HUB_SERVICE` / `DASHBOARD_SERVICE` / `COLLECTOR_SERVICE` | `limit-hub` / `limit-dashboard` / `limit-collector` | 対象 unit 名(**既定値のみ対応**。カスタム名は unit 名 / 依存関係と連動しないため fail-closed で事前拒否) |
@@ -312,14 +312,14 @@ token 値が shell history へ残るのを避けたい場合は、エディタ�
 #### 0-5. root で初回 deploy を実行する(SUDO_USER 必須)
 
 ```bash
-VITE_HUB_BASE_URL=http://limit-monitor.local:8787 sudo -E ./deploy.ts --server --collector
+VITE_HUB_BASE_URL=http://limit-monitor.local:8787 sudo ./deploy.ts --hub-base-url <url> --server --collector
 ```
 
-**初回 root deploy は `sudo -E`(SUDO_USER 継承)が必須。** service 実行ユーザーは
-`SUDO_USER` から解決するため、`sudo -E` でないと主体不明として fail-closed で
+**初回 root deploy は `sudo`(SUDO_USER 継承)が必須。** service 実行ユーザーは
+`SUDO_USER` から解決するため、`sudo` でないと主体不明として fail-closed で
 止まる(user / group を指定する option は無い)。SUDO_USER 無い root シェルでは
 build manifest が stale なら npm を実行せず fail-closed で die する(0-1 を非 root
-で実行済みなら manifest が一致するため成立するが、再実行経路のため `sudo -E` を
+で実行済みなら manifest が一致するため成立するが、再実行経路のため `sudo` を
 使う)。collector-token / state dir の検証不一致も fail-closed で止まる。
 
 ### 1. 初回 deploy と systemd 反映
@@ -327,7 +327,7 @@ build manifest が stale なら npm を実行せず fail-closed で die する(0
 (上記 Phase 0 の 0-0 → 0-5 の順を実行する。clean host では 0-0 / 0-1 を先に行うこと。
 `--install-systemd` は `collector-token` と `/var/lib/limit-monitor` を current
 切替前に検証するため、0-2 / 0-4 を済ませていない clean host でいきなり
-`sudo -E ./deploy.ts --server --collector` を実行しても成立しない。)
+`sudo ./deploy.ts --hub-base-url <url> --server --collector` を実行しても成立しない。)
 
 `--install-systemd` は以下をまとめて行う:
 
@@ -390,10 +390,10 @@ Hub 側で確定するため collector 側の設定は不要。再発行(`issue`
 自分の HOME 配下の login 情報を読む。collector は install user(= deploy を実行した
 通常ユーザー)として動くため、**そのアカウントで `codex` / `claude` に login 済み**で
 あること。`ProtectHome=false` のままにする。deploy 時にアカウントを指定する
-option / 環境変数は無く、`sudo -E` の `SUDO_USER` から自動で決まる:
+option / 環境変数は無く、`sudo` の `SUDO_USER` から自動で決まる:
 
 ```bash
-VITE_HUB_BASE_URL=... sudo -E ./deploy.ts --collector
+VITE_HUB_BASE_URL=... sudo ./deploy.ts --hub-base-url <url> --collector
 ```
 
 `--install-systemd` は install user を解決できない場合(root 直接で `SUDO_USER` が
@@ -495,7 +495,7 @@ Codex 側は応答のうち `limitId` / `usedPercent` / `windowDurationMins` / `
 
 ```bash
 git pull
-VITE_HUB_BASE_URL=http://limit-monitor.local:8787 sudo -E ./deploy.ts --server --collector
+VITE_HUB_BASE_URL=http://limit-monitor.local:8787 sudo ./deploy.ts --hub-base-url <url> --server --collector
 ```
 
 過去 release は `KEEP_RELEASES` 件まで残るため、切り戻しは symlink を戻して再起動する:

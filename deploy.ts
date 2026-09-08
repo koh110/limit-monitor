@@ -2,9 +2,9 @@
 /**
  * limit-monitor の正規 deploy 入口。
  *
- *   sudo -E ./deploy.ts --server              # Hub + Dashboard
- *   sudo -E ./deploy.ts --collector           # Collector
- *   sudo -E ./deploy.ts --server --collector  # 全サービス
+ *   sudo ./deploy.ts --hub-base-url <url> --server              # Hub + Dashboard
+ *   sudo ./deploy.ts --hub-base-url <url> --collector           # Collector
+ *   sudo ./deploy.ts --hub-base-url <url> --server --collector  # 全サービス
  *
  * ここは薄い委譲層で、実処理は deploy/deploy.sh が行う。この入口の責務は:
  *   - 対象サービスの選択を明示的に受け取る(未選択 / 未知引数は fail-closed)
@@ -32,6 +32,7 @@ export type ParsedArgs = {
   dryRun: boolean
   /** 選択順ではなく server -> collector の canonical 順 */
   services: ServiceTarget[]
+  hubBaseUrl: string | undefined
 }
 
 export type ParseResult = { ok: true; value: ParsedArgs } | { ok: false; message: string }
@@ -39,13 +40,14 @@ export type ParseResult = { ok: true; value: ParsedArgs } | { ok: false; message
 export const USAGE = `limit-monitor deploy
 
 使い方:
-  sudo -E ./deploy.ts --server              Hub + Dashboard を deploy する
-  sudo -E ./deploy.ts --collector           Collector を deploy する
-  sudo -E ./deploy.ts --server --collector  全サービスを deploy する
+  sudo ./deploy.ts --server --hub-base-url <url>              Hub + Dashboard を deploy する
+  sudo ./deploy.ts --collector --hub-base-url <url>           Collector を deploy する
+  sudo ./deploy.ts --server --collector --hub-base-url <url>  全サービスを deploy する
 
 引数:
   --server           limit-hub.service と limit-dashboard.service を対象にする
   --collector        limit-collector.service を対象にする
+  --hub-base-url     Dashboard に埋め込む Hub の URL(sudoの環境保持に依存しない)
   --dry-run          委譲先コマンドを表示するだけで実行しない
   -h, --help         このヘルプを表示する
 
@@ -55,10 +57,10 @@ export const USAGE = `limit-monitor deploy
 service 実行ユーザーは deploy を実行した通常ユーザーに統一する。limit-monitor
 専用の Linux user は作らず、実行ユーザーの指定も求めない。sudo 経由なら
 SUDO_USER から自動解決し、root 直接で主体が不明なら停止する。その場合は
-自分の通常アカウントから 'sudo -E ./deploy.ts ...' で実行し直すこと。
+自分の通常アカウントから 'sudo ./deploy.ts ... --hub-base-url <url>' で実行し直すこと。
 
 環境変数(deploy/deploy.sh へそのまま渡る。値はここでは出力しない):
-  VITE_HUB_BASE_URL  必須。Dashboard の build に焼き込む Hub の base URL
+  VITE_HUB_BASE_URL  Dashboardのbuildに焼き込むHub URL(または--hub-base-url)
   INSTALL_DIR        release 配置先(既定 /var/www/limit-monitor)
   KEEP_RELEASES      残す過去 release 数(既定 5)
 
@@ -73,6 +75,7 @@ export function parseArgs(argv: readonly string[]): ParseResult {
   let dryRun = false
   let server = false
   let collector = false
+  let hubBaseUrl: string | undefined
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
@@ -96,13 +99,28 @@ export function parseArgs(argv: readonly string[]): ParseResult {
         }
         collector = true
         break
+      case '--hub-base-url': {
+        const value = argv[i + 1]
+        if (value === undefined || !/^https?:\/\//.test(value)) {
+          return {
+            ok: false,
+            message: `--hub-base-url requires an http(s) URL (got: ${value ?? '<missing>'})`
+          }
+        }
+        if (hubBaseUrl !== undefined) {
+          return { ok: false, message: '--hub-base-url is specified more than once' }
+        }
+        hubBaseUrl = value
+        i += 1
+        break
+      }
       default:
         return { ok: false, message: `unknown argument: ${arg}` }
     }
   }
 
   if (help) {
-    return { ok: true, value: { help: true, dryRun, services: [] } }
+    return { ok: true, value: { help: true, dryRun, services: [], hubBaseUrl } }
   }
 
   const services: ServiceTarget[] = []
@@ -119,7 +137,7 @@ export function parseArgs(argv: readonly string[]): ParseResult {
     }
   }
 
-  return { ok: true, value: { help: false, dryRun, services } }
+  return { ok: true, value: { help: false, dryRun, services, hubBaseUrl } }
 }
 
 /**
@@ -128,7 +146,11 @@ export function parseArgs(argv: readonly string[]): ParseResult {
  * identity に関する引数は渡さない(利用者にも指定を求めない)。
  */
 export function buildDeployShArgs(parsed: ParsedArgs): string[] {
-  return ['--install-systemd', '--services', parsed.services.join(',')]
+  const args = ['--install-systemd', '--services', parsed.services.join(',')]
+  if (parsed.hubBaseUrl !== undefined) {
+    args.push('--hub-base-url', parsed.hubBaseUrl)
+  }
+  return args
 }
 
 export type RepoRoot = { ok: true; root: string; script: string } | { ok: false; message: string }
@@ -187,11 +209,14 @@ function main(argv: readonly string[]): void {
     fail(repo.message)
   }
 
-  // 値は出さない(秘密値を log へ出さない方針を全 env に一律適用する)。
+  // sudo-rsなどが環境全体保持(-E)を無視しても、公開URLは明示引数で渡せる。
+  if (parsed.value.hubBaseUrl !== undefined) {
+    process.env.VITE_HUB_BASE_URL = parsed.value.hubBaseUrl
+  }
   // 未設定のまま進むと deploy.sh 側で die するため、ここで先に案内する。
   if ((process.env.VITE_HUB_BASE_URL ?? '') === '') {
     fail(
-      'VITE_HUB_BASE_URL is required (baked into the dashboard build). Set it and re-run with sudo -E so the value is preserved'
+      'VITE_HUB_BASE_URL is required (baked into the dashboard build). Pass --hub-base-url <url>'
     )
   }
 
@@ -203,8 +228,8 @@ function main(argv: readonly string[]): void {
 
   if (process.getuid?.() !== 0) {
     fail(
-      "systemd install requires root. Re-run as 'sudo -E ./deploy.ts " +
-        `${argv.join(' ')}' so SUDO_USER and VITE_HUB_BASE_URL are preserved`
+      "systemd install requires root. Re-run as 'sudo ./deploy.ts --hub-base-url <url> " +
+        `${argv.join(' ')}' so SUDO_USER is preserved; pass --hub-base-url explicitly`
     )
   }
 
