@@ -1,16 +1,17 @@
-import { useLoaderData, useRevalidator } from 'react-router-dom'
+import { useRevalidator } from 'react-router'
 import { AccountCard } from '../components/AccountCard'
 import { AutoRefresh } from '../components/AutoRefresh'
 import { REFRESH_INTERVAL_MS } from '../constants'
 import { fetchStatus } from '../lib/api-client'
 import { formatJst } from '../lib/format'
+import type { Route } from './+types/dashboard'
 
-export function dashboardLoader() {
+// ssr: false のため取得はブラウザ側で行う(clientLoader)。
+export function clientLoader() {
   return fetchStatus()
 }
 
-export function Dashboard() {
-  const result = useLoaderData<typeof dashboardLoader>()
+export default function Dashboard({ loaderData: result }: Route.ComponentProps) {
   const { revalidate } = useRevalidator()
   const now = new Date()
 

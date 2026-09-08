@@ -3,6 +3,7 @@ dist/
 tsp-output/
 packages/shared/src/generated/
 .next/
+.react-router/
 .env
 *.sqlite
 *.sqlite-journal
