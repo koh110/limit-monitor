@@ -25,12 +25,12 @@ beforeEach(() => {
   vi.resetModules()
 })
 
-test('既定は localhost bind / port 3000 であり public origin も localhost 由来', async () => {
+test('既定は localhost bind / port 8788 であり public origin も localhost 由来', async () => {
   setEnv({})
   const { HOST, PORT, DASHBOARD_PUBLIC_ORIGIN } = await loadConfig()
   expect(HOST).toBe('127.0.0.1')
-  expect(PORT).toBe(3000)
-  expect(DASHBOARD_PUBLIC_ORIGIN).toBe('http://127.0.0.1:3000')
+  expect(PORT).toBe(8788)
+  expect(DASHBOARD_PUBLIC_ORIGIN).toBe('http://127.0.0.1:8788')
 })
 
 test('bind address(HOST)と public origin は分離できる', async () => {

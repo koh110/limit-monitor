@@ -9,7 +9,7 @@ import path from 'node:path'
 function resolvePort(raw: string | undefined) {
   const trimmed = (raw ?? '').trim()
   if (trimmed.length === 0) {
-    return 3000
+    return 8788
   }
   const value = Number(trimmed)
   if (!Number.isInteger(value) || value < 1 || value > 65535) {

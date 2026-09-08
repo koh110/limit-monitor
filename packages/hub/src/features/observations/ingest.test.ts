@@ -1,5 +1,7 @@
 import { HTTPException } from 'hono/http-exception'
 import type { Observation } from 'shared/src/contracts'
+import { latestLimits } from 'shared/src/db/schema'
+import { eq } from 'drizzle-orm'
 import { expect, test } from 'vite-plus/test'
 import { createTestDb } from '../../../test/util.js'
 import { getStatus } from '../status/get.js'
@@ -36,22 +38,18 @@ async function statusBuckets(db: Parameters<typeof getStatus>[0]['db']) {
   })
 }
 
-test('token の sourceId と payload の sourceId が一致しない場合は 403', async () => {
+test('payload の sourceId が異なっても token の sourceId に正規化して受理する', async () => {
   const { db, cleanup } = createTestDb()
-  const error = await ingestObservation({
+  const result = await ingestObservation({
     db,
-    observation: createObservation({ sourceId: 'other-machine' }),
+    observation: createObservation({ sourceId: 'collector-config-name' }),
     tokenSourceId: 'dev-machine',
     tokenAccountAlias: 'default',
     now
-  }).catch((err: unknown) => {
-    return err
   })
-  expect(error).toBeInstanceOf(HTTPException)
-  if (error instanceof HTTPException) {
-    expect(error.status).toBe(403)
-  }
-  expect(await statusBuckets(db)).toEqual([])
+  expect(result.accepted).toEqual(['codex:primary'])
+  const [row] = await db.select({ sourceId: latestLimits.sourceId }).from(latestLimits).where(eq(latestLimits.bucketId, 'codex:primary'))
+  expect(row?.sourceId).toBe('dev-machine')
   cleanup()
 })
 

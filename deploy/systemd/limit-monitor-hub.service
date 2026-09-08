@@ -1,5 +1,5 @@
 # Limit Hub systemd unit template
-# 配置例: /etc/systemd/system/limit-hub.service
+# 配置例: /etc/systemd/system/limit-monitor-hub.service
 #
 # 配置先と DB path は unit を書き換えずに EnvironmentFile で切り替える:
 #   sudo install -d -m 755 /etc/limit-monitor
@@ -17,7 +17,7 @@ Wants=network-online.target
 Type=simple
 # 実行ユーザーは deploy を実行した通常ユーザー(install user)。
 # limit-monitor 専用の Linux user は作らないし前提にもしない。
-# deploy/deploy.sh --install-systemd が SUDO_USER(sudo -E 経由)または現在の
+# deploy/deploy.sh --install-systemd が SUDO_USER(sudo 経由)または現在の
 # ユーザーから自動解決した user:group で placeholder を埋めて配置する(利用者に
 # user / group の指定は求めない。root 直接で主体不明なら fail-closed)。
 # 手動で unit を置く場合はここを実アカウントへ書き換える。

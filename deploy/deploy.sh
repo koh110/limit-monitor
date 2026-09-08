@@ -5,12 +5,12 @@
 # 明示的に渡してこの script へ委譲する。直接実行してもよい(その場合も
 # --services で対象サービスを明示すること)。
 #
-#   releases/<release-id>/   ... build 済み artifact + 本番依存のみの node_modules
-#   current -> releases/...  ... systemd unit が参照する symlink(切替は atomic)
+#   versions/<package.json version>/   ... build 済み artifact + 本番依存のみの node_modules
+#   current -> versions/<package.json version>  ... systemd unit が参照する symlink(切替は atomic)
 #
 # 対象サービス(--services、既定 server,collector):
-#   server    ... limit-hub.service + limit-dashboard.service
-#   collector ... limit-collector.service
+#   server    ... limit-monitor-hub.service + limit-monitor-dashboard.service
+#   collector ... limit-monitor-collector.service
 #
 # service 実行ユーザーは「install を実行した通常ユーザー」に統一する。
 # limit-monitor 専用の Linux user は作らないし前提にもしない。実行ユーザーの
@@ -22,7 +22,8 @@
 #
 # 使い方(clean checkout: まず非 root の --prepare-build、その後に root 実行):
 #   VITE_HUB_BASE_URL=... deploy/deploy.sh --prepare-build
-#   VITE_HUB_BASE_URL=... sudo -E deploy/deploy.sh --install-systemd --services server,collector
+#   sudo deploy/deploy.sh --hub-base-url <url> --install-systemd --services server,collector
+#   sudo deploy/deploy.sh --hub-base-url <url> --force --install-systemd --services server,collector
 #   VITE_HUB_BASE_URL=... deploy/deploy.sh --install-dir /srv/limit-monitor --restart
 #
 # clean checkout では build artifacts / node_modules / build manifest が未生成、
@@ -69,6 +70,9 @@ INSTALL_GROUP=""
 DEPLOY_NODE_BIN=""
 # render 済み unit の一時ディレクトリ(/etc/systemd/system に入る本体)
 RENDERED_SYSTEMD_DIR=""
+# --force で既存 version directory を退避した場合の rollback path。配置処理が
+# 失敗した EXIT 時は旧 directory を同じ path へ復元し、成功時だけ削除する。
+VERSION_BACKUP_DIR=""
 
 # deploy.env があれば読み込む。呼び出し元の環境変数を優先し、deploy.env の値は
 # 未設定の変数にだけ適用する(source だとファイル側が上書きしてしまうため)。
@@ -98,7 +102,8 @@ INSTALL_SERVER=0
 INSTALL_COLLECTOR=0
 
 INSTALL_DIR="${INSTALL_DIR:-/var/www/limit-monitor}"
-KEEP_RELEASES="${KEEP_RELEASES:-5}"
+KEEP_VERSIONS="${KEEP_VERSIONS:-5}"
+FORCE_VERSION="${FORCE_VERSION:-0}"
 DEPLOY_RESTART="${DEPLOY_RESTART:-0}"
 DEPLOY_INSTALL_SYSTEMD="${DEPLOY_INSTALL_SYSTEMD:-0}"
 DEPLOY_PREPARE_BUILD="${DEPLOY_PREPARE_BUILD:-0}"
@@ -108,18 +113,18 @@ DEPLOY_PREPARE_BUILD="${DEPLOY_PREPARE_BUILD:-0}"
 # セクション(このフラグを読む箇所)に到達しないため無害
 LIMIT_MONITOR_PREPARE_RETRY="${LIMIT_MONITOR_PREPARE_RETRY:-0}"
 SKIP_NPM_CI="${SKIP_NPM_CI:-0}"
-HUB_SERVICE="${HUB_SERVICE:-limit-hub}"
-COLLECTOR_SERVICE="${COLLECTOR_SERVICE:-limit-collector}"
-DASHBOARD_SERVICE="${DASHBOARD_SERVICE:-limit-dashboard}"
+HUB_SERVICE="${HUB_SERVICE:-limit-monitor-hub}"
+COLLECTOR_SERVICE="${COLLECTOR_SERVICE:-limit-monitor-collector}"
+DASHBOARD_SERVICE="${DASHBOARD_SERVICE:-limit-monitor-dashboard}"
 
 # カスタム service 名は unit 名 / 依存関係(After=/Wants=)と連動できないため
 # 非既定値は事前拒否する(fail-closed、Major 4)。既定名で運用すること。
-[[ "${HUB_SERVICE}" == "limit-hub" ]] \
-  || die "HUB_SERVICE must be the default 'limit-hub' (got: ${HUB_SERVICE}); custom service names are not supported"
-[[ "${COLLECTOR_SERVICE}" == "limit-collector" ]] \
-  || die "COLLECTOR_SERVICE must be the default 'limit-collector' (got: ${COLLECTOR_SERVICE}); custom service names are not supported"
-[[ "${DASHBOARD_SERVICE}" == "limit-dashboard" ]] \
-  || die "DASHBOARD_SERVICE must be the default 'limit-dashboard' (got: ${DASHBOARD_SERVICE}); custom service names are not supported"
+[[ "${HUB_SERVICE}" == "limit-monitor-hub" ]] \
+  || die "HUB_SERVICE must be the default 'limit-monitor-hub' (got: ${HUB_SERVICE}); custom service names are not supported"
+[[ "${COLLECTOR_SERVICE}" == "limit-monitor-collector" ]] \
+  || die "COLLECTOR_SERVICE must be the default 'limit-monitor-collector' (got: ${COLLECTOR_SERVICE}); custom service names are not supported"
+[[ "${DASHBOARD_SERVICE}" == "limit-monitor-dashboard" ]] \
+  || die "DASHBOARD_SERVICE must be the default 'limit-monitor-dashboard' (got: ${DASHBOARD_SERVICE}); custom service names are not supported"
 
 trim_leading_space() {
   local value="$1"
@@ -253,10 +258,10 @@ resolve_selected_services() {
 # 選択された service の unit template 名を stdout へ 1 行ずつ出す。**読み取り専用**。
 selected_unit_templates() {
   if [[ "${INSTALL_SERVER}" -eq 1 ]]; then
-    printf '%s\n' limit-hub.service limit-dashboard.service
+    printf '%s\n' limit-monitor-hub.service limit-monitor-dashboard.service
   fi
   if [[ "${INSTALL_COLLECTOR}" -eq 1 ]]; then
-    printf '%s\n' limit-collector.service
+    printf '%s\n' limit-monitor-collector.service
   fi
 }
 
@@ -476,18 +481,14 @@ check_managed_unit() {
   return 0
 }
 
-validate_dashboard_cors() {
-  # 読み取り専用。$1/$2 で検証対象 env を指定できる(初回は render 済み temp)
-  local hub_env_file="${1:-${LIMIT_MONITOR_ETC_DIR}/hub.env}"
-  local client_env_file="${2:-${LIMIT_MONITOR_ETC_DIR}/dashboard.env}"
-  local client_host client_port client_origin cors_allowed found origin
+dashboard_origin_from_env() {
+  local client_env_file="$1"
+  local client_host client_port client_origin
 
   client_host="$(read_env_value "$client_env_file" HOST '127.0.0.1')"
-  client_port="$(read_env_value "$client_env_file" PORT '3000')"
+  client_port="$(read_env_value "$client_env_file" PORT '8788')"
   # ブラウザが実際に送る origin は bind address(HOST)ではない。
-  # LAN bind(0.0.0.0 等)では http://0.0.0.0:port はブラウザが送らない origin
-  # になるため、ブラウザ向け origin を DASHBOARD_PUBLIC_ORIGIN で分離して
-  # 指定する。localhost 既定の bind のみ HOST/PORT 由来で導出する。
+  # LAN bind(0.0.0.0 等)では DASHBOARD_PUBLIC_ORIGIN を必須にする。
   client_origin="$(read_env_value "$client_env_file" DASHBOARD_PUBLIC_ORIGIN '')"
   if [[ -z "$client_origin" ]]; then
     if [[ "$client_host" == "127.0.0.1" || "$client_host" == "localhost" ]]; then
@@ -496,11 +497,50 @@ validate_dashboard_cors() {
       die "DASHBOARD_PUBLIC_ORIGIN must be set in ${client_env_file} when HOST=${client_host} (LAN bind); set the browser-facing origin used for CORS"
     fi
   fi
-  # DASHBOARD_PUBLIC_ORIGIN を URL として厳密に検証する(client 側
-  # isStrictOrigin と同じ URL 集合: http(s)://host[:port] のみ、
-  # pathname / search / hash / userinfo 禁止)。不正値は current 切替前に die
   is_strict_origin "$client_origin" \
     || die "DASHBOARD_PUBLIC_ORIGIN must be an origin (http://host or https://host, optional :port; no path/search/hash/credentials, got: ${client_origin})"
+  printf '%s' "$client_origin"
+}
+
+# 既存 hub.env を検証用 temporary fileへコピーし、Dashboard originを
+# CORS_ALLOWED_ORIGINSへ追加する。secretや他の設定は変更しない。
+sync_hub_cors_origin() {
+  local source="$1"
+  local dest="$2"
+  local dashboard_origin="$3"
+  local line value origin found=0
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == CORS_ALLOWED_ORIGINS=* ]]; then
+      value="${line#*=}"
+      IFS=',' read -r -a origins <<< "$value"
+      for origin in "${origins[@]}"; do
+        origin="$(trim_space "$origin")"
+        if [[ "$origin" == "$dashboard_origin" ]]; then
+          found=1
+          break
+        fi
+      done
+      if [[ "$found" -eq 0 ]]; then
+        value="${value},${dashboard_origin}"
+      fi
+      line="CORS_ALLOWED_ORIGINS=${value}"
+      found=1
+    fi
+    printf '%s\n' "$line" >> "$dest"
+  done < "$source"
+
+  [[ "$found" -eq 1 ]] \
+    || die "${source} is missing CORS_ALLOWED_ORIGINS; cannot synchronize dashboard origin"
+}
+
+validate_dashboard_cors() {
+  # 読み取り専用。$1/$2 で検証対象 env を指定できる(初回は render 済み temp)
+  local hub_env_file="${1:-${LIMIT_MONITOR_ETC_DIR}/hub.env}"
+  local client_env_file="${2:-${LIMIT_MONITOR_ETC_DIR}/dashboard.env}"
+  local client_origin cors_allowed found origin
+
+  client_origin="$(dashboard_origin_from_env "$client_env_file")"
   cors_allowed="$(read_env_value "$hub_env_file" CORS_ALLOWED_ORIGINS '')"
 
   [[ -n "$cors_allowed" ]] || die "CORS_ALLOWED_ORIGINS is missing from ${hub_env_file}"
@@ -509,9 +549,7 @@ validate_dashboard_cors() {
   for origin in "${cors_origins[@]}"; do
     # Hub 本体(packages/hub/src/config.ts)と一致させる:
     # .split(',').map(o => o.trim()).filter(o => o.length > 0)
-    # 前後空白を trim してから exact match し、空要素はスキップする
-    origin="${origin#"${origin%%[![:space:]]*}"}"
-    origin="${origin%"${origin##*[![:space:]]}"}"
+    origin="$(trim_space "$origin")"
     if [[ -n "$origin" && "$origin" == "$client_origin" ]]; then
       found=1
       break
@@ -575,7 +613,7 @@ render_unit_from_template() {
   #    (既定 60 -> simple / 0 -> oneshot)。template 側の既定 Type=simple は
   #    安全な値のまま保持し、env から render で上書きする。render 後の
   #    Type 妥当性は validate_rendered_units(systemd-analyze verify)で確認する
-  if [[ "${unit_name}" == "limit-collector.service" ]]; then
+  if [[ "${unit_name}" == "limit-monitor-collector.service" ]]; then
     local unit_type rendered_type
     unit_type="$(collector_unit_type)"
     sed -i "s|^Type=.*$|Type=${unit_type}|" "$out"
@@ -593,7 +631,7 @@ validate_rendered_units() {
     rendered="$(basename "$unit_file")"
     # placeholder が残っていれば起動できない。未指定で enable/start しない
     if grep -q '^User=CHANGE_ME$\|^Group=CHANGE_ME$' "$unit_file"; then
-      die "${rendered} still contains CHANGE_ME placeholder; the resolved install user/group was not rendered into the unit (run --install-systemd through 'sudo -E' from your normal account so the install user can be resolved)"
+      die "${rendered} still contains CHANGE_ME placeholder; the resolved install user/group was not rendered into the unit (run --install-systemd through 'sudo' from your normal account so the install user can be resolved)"
     fi
     # render 後の ExecStart が実際に存在する node path を指しているか
     local node_path
@@ -1022,7 +1060,8 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --install-dir) INSTALL_DIR="${2:-}"; shift 2 ;;
     --hub-base-url) VITE_HUB_BASE_URL="${2:-}"; shift 2 ;;
-    --keep-releases) KEEP_RELEASES="${2:-}"; shift 2 ;;
+    --keep-versions) KEEP_VERSIONS="${2:-}"; shift 2 ;;
+    --force) FORCE_VERSION=1; shift ;;
     --restart) DEPLOY_RESTART=1; shift ;;
     --no-restart) DEPLOY_RESTART=0; shift ;;
     --install-systemd) DEPLOY_INSTALL_SYSTEMD=1; DEPLOY_RESTART=1; shift ;;
@@ -1043,8 +1082,8 @@ log "selected services: $(selected_unit_templates | tr '\n' ' ')"
 
 [[ "${INSTALL_DIR}" == /* ]] || die "INSTALL_DIR must be an absolute path (got: ${INSTALL_DIR})"
 [[ "${INSTALL_DIR}" != "/" ]] || die "INSTALL_DIR must not be /"
-[[ "${KEEP_RELEASES}" =~ ^[0-9]+$ ]] || die "KEEP_RELEASES must be a non-negative integer"
-[[ "${KEEP_RELEASES}" -ge 1 ]] || die "KEEP_RELEASES must be >= 1"
+[[ "${KEEP_VERSIONS}" =~ ^[0-9]+$ ]] || die "KEEP_VERSIONS must be a non-negative integer"
+[[ "${KEEP_VERSIONS}" -ge 1 ]] || die "KEEP_VERSIONS must be >= 1"
 
 # Dashboard は Hub URL を build 時に焼き込む SPA なので、既定値のまま
 # release すると LAN から動かない。明示指定を必須にする。
@@ -1094,12 +1133,17 @@ if [[ "${DEPLOY_INSTALL_SYSTEMD}" == "1" ]]; then
     || die "install user/group could not be resolved for --install-systemd"
 fi
 
-if [[ -n "${RELEASE_ID:-}" ]]; then
-  [[ "${RELEASE_ID}" =~ ^[A-Za-z0-9._-]+$ ]] || die "RELEASE_ID must match [A-Za-z0-9._-]"
-else
-  git_rev="$(git -C "${REPO_ROOT}" rev-parse --short HEAD 2>/dev/null || echo nogit)"
-  RELEASE_ID="$(date -u +%Y%m%d%H%M%S)-${git_rev}"
-fi
+VERSION_ID="$(node -e '
+const fs = require("node:fs")
+const pkg = JSON.parse(fs.readFileSync(process.argv[1], "utf8"))
+const version = typeof pkg.version === "string" ? pkg.version : ""
+const match = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/.exec(version)
+const prerelease = match?.[4]?.split(".") ?? []
+const validPrerelease = prerelease.every((part) => !/^[0-9]+$/.test(part) || !part.startsWith("0") || part === "0")
+if (!match || !validPrerelease) process.exit(1)
+process.stdout.write(version)
+' "${REPO_ROOT}/package.json")" \
+  || die "package.json version must be valid semver"
 
 # --- build manifest -----------------------------------------------------------
 # root は npm ci/build を実行しないため、既存 artifacts が**今回 deploy する
@@ -1603,13 +1647,20 @@ check_build_manifest() {
   return 0
 }
 
-RELEASES_DIR="${INSTALL_DIR}/releases"
-RELEASE_DIR="${RELEASES_DIR}/${RELEASE_ID}"
-[[ ! -e "${RELEASE_DIR}" ]] || die "release already exists: ${RELEASE_DIR}"
+VERSIONS_DIR="${INSTALL_DIR}/versions"
+VERSION_DIR="${VERSIONS_DIR}/${VERSION_ID}"
+# --prepare-build はbuild artifact / manifestだけを生成する経路であり、version directoryの
+# 存在や --force は関係しない。root deployからSUDO_USERとして再実行される場合も、
+# ここで既存versionを検証するとprepareへ到達できないため、prepare-onlyではskipする。
+if [[ "${DEPLOY_PREPARE_BUILD}" != "1" && ( -e "${VERSION_DIR}" || -L "${VERSION_DIR}" ) ]]; then
+  [[ "${FORCE_VERSION}" == "1" ]] \
+    || die "version already exists: ${VERSION_DIR} (use --force to replace it explicitly)"
+  log "--force enabled: existing version will be replaced: ${VERSION_DIR}"
+fi
 
 log "repo:         ${REPO_ROOT}"
 log "install dir:  ${INSTALL_DIR}"
-log "release id:   ${RELEASE_ID}"
+log "version:      ${VERSION_ID}"
 log "hub base url: ${VITE_HUB_BASE_URL}"
 
 # --prepare-build(非 root のみ): npm ci + 全 workspace build + VITE_HUB_BASE_URL での
@@ -1669,7 +1720,7 @@ fi
 
 # root(EUID=0)では npm ci / npm build を実行しない(安全境界: npm は決して root で実行しない)。
 # clean checkout(= build manifest 未生成)や stale build(manifest と現在 tree が一致しない)
-# で `sudo -E deploy/deploy.sh --install-systemd` を単一コマンドで成立させるため、下方 build
+# で `sudo ./deploy.ts --hub-base-url <url> --server --collector` を単一コマンドで成立させるため、下方 build
 # セクションの manifest 検証で失敗したとき SUDO_USER(呼び出し元ユーザー)として --prepare-build
 # を一度だけ再実行する(子プロセス: npm ci + build + manifest で終了)。再実行後も stale
 # のままなら fail-closed で die。SUDO_USER の無い root シェルは fail-closed(下方で
@@ -1713,7 +1764,7 @@ if [[ "${EUID}" -eq 0 ]]; then
         PATH="${SUDO_USER_PATH}" \
         VITE_HUB_BASE_URL="${VITE_HUB_BASE_URL}" \
         bash "${REPO_ROOT}/deploy/deploy.sh" --prepare-build \
-        || die "--prepare-build as ${SUDO_USER} failed; fix and re-run 'sudo -E deploy/deploy.sh --install-systemd'"
+        || die "--prepare-build as ${SUDO_USER} failed; fix and re-run 'sudo ./deploy.ts --hub-base-url <url> --server --collector'"
       if ! check_build_manifest; then
         die "build manifest is still stale after re-running --prepare-build as ${SUDO_USER} (fail-closed: ${BUILD_MANIFEST_FILE}); inspect the source tree / node_modules / VITE_HUB_BASE_URL and re-run 'deploy/deploy.sh --prepare-build' manually"
       fi
@@ -1759,7 +1810,30 @@ done
 # --- staging -----------------------------------------------------------------
 
 STAGE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/limit-monitor-stage.XXXXXX")"
-cleanup() { rm -rf "${STAGE_DIR}"; }
+restore_version_backup() {
+  local exit_status="$1"
+  if [[ -z "${VERSION_BACKUP_DIR}" ]]; then
+    return
+  fi
+  if [[ "${exit_status}" -eq 0 ]]; then
+    rm -rf -- "${VERSION_BACKUP_DIR}"
+    VERSION_BACKUP_DIR=""
+    return
+  fi
+  rm -rf -- "${VERSION_DIR}" || true
+  if mv -T -- "${VERSION_BACKUP_DIR}" "${VERSION_DIR}"; then
+    log "restored previous version after failed --force deployment: ${VERSION_DIR}"
+    VERSION_BACKUP_DIR=""
+  else
+    log "ERROR: failed to restore previous version: ${VERSION_BACKUP_DIR} -> ${VERSION_DIR}"
+  fi
+}
+cleanup() {
+  local exit_status="$?"
+  restore_version_backup "${exit_status}"
+  rm -rf "${STAGE_DIR}"
+  return "${exit_status}"
+}
 trap cleanup EXIT
 
 log "staging artifacts into ${STAGE_DIR}"
@@ -1838,7 +1912,12 @@ if [[ "${DEPLOY_INSTALL_SYSTEMD}" == "1" ]]; then
 
   RENDERED_SYSTEMD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/limit-monitor-units.XXXXXX")"
   RENDERED_ENV_DIR="$(mktemp -d "${TMPDIR:-/tmp}/limit-monitor-envs.XXXXXX")"
-  cleanup() { rm -rf "${STAGE_DIR}" "${RENDERED_SYSTEMD_DIR}" "${RENDERED_ENV_DIR}"; }
+  cleanup() {
+    local exit_status="$?"
+    restore_version_backup "${exit_status}"
+    rm -rf "${STAGE_DIR}" "${RENDERED_SYSTEMD_DIR}" "${RENDERED_ENV_DIR}"
+    return "${exit_status}"
+  }
   trap cleanup EXIT
 
   # === 検証フェーズ(読み取り専用: /etc には一切書き込まない) ===
@@ -1863,6 +1942,20 @@ if [[ "${DEPLOY_INSTALL_SYSTEMD}" == "1" ]]; then
       render_initial_collector_cli_bins "${RENDERED_ENV_DIR}/collector.env"
     fi
   fi
+
+  # 1b) --hub-base-urlに連動するCORS設定をtemporary envへ同期する。
+  #     Dashboardの既存設定(host/port/public origin)は変更せず、現在の
+  #     Dashboard originだけをHubのCORS_ALLOWED_ORIGINSへ追加する。
+  HUB_ENV_FOR_DEPLOY="$(env_file_or_rendered "${LIMIT_MONITOR_ETC_DIR}/hub.env" "${RENDERED_ENV_DIR}/hub.env")"
+  DASHBOARD_ENV_FOR_DEPLOY="$(env_file_or_rendered "${LIMIT_MONITOR_ETC_DIR}/dashboard.env" "${RENDERED_ENV_DIR}/dashboard.env")"
+  if [[ "${INSTALL_SERVER}" -eq 1 ]]; then
+    dashboard_origin="$(dashboard_origin_from_env "${DASHBOARD_ENV_FOR_DEPLOY}")"
+    HUB_ENV_SYNCED="${RENDERED_ENV_DIR}/hub-effective.env"
+    sync_hub_cors_origin "${HUB_ENV_FOR_DEPLOY}" "${HUB_ENV_SYNCED}" "${dashboard_origin}"
+    HUB_ENV_FOR_DEPLOY="${HUB_ENV_SYNCED}"
+    log "synchronized Hub CORS origin for dashboard: ${dashboard_origin}"
+  fi
+
   # 2) rendered unit: 実 node path 注入 + CHANGE_ME placeholder 除去 +
   #    collector の Type を env の interval に整合(temp へ)
   while IFS= read -r template; do
@@ -1871,7 +1964,7 @@ if [[ "${DEPLOY_INSTALL_SYSTEMD}" == "1" ]]; then
       "${DEPLOY_NODE_BIN}" \
       "${RENDERED_SYSTEMD_DIR}/${template}"
     log "rendered ${template} (ExecStart node: ${DEPLOY_NODE_BIN}, User/Group: ${INSTALL_USER}:${INSTALL_GROUP})"
-    if [[ "${template}" == "limit-collector.service" ]]; then
+    if [[ "${template}" == "limit-monitor-collector.service" ]]; then
       log "rendered ${template} Type=$(sed -n 's|^Type=||p' "${RENDERED_SYSTEMD_DIR}/${template}") (COLLECTOR_INTERVAL_SECONDS based)"
     fi
   done < <(selected_unit_templates)
@@ -1895,7 +1988,11 @@ if [[ "${DEPLOY_INSTALL_SYSTEMD}" == "1" ]]; then
     selected_env_names+=(collector)
   fi
   for env_name in "${selected_env_names[@]}"; do
-    env_target="$(env_file_or_rendered "${LIMIT_MONITOR_ETC_DIR}/${env_name}.env" "${RENDERED_ENV_DIR}/${env_name}.env")"
+    case "${env_name}" in
+      hub) env_target="${HUB_ENV_FOR_DEPLOY}" ;;
+      dashboard) env_target="${DASHBOARD_ENV_FOR_DEPLOY}" ;;
+      *) env_target="$(env_file_or_rendered "${LIMIT_MONITOR_ETC_DIR}/${env_name}.env" "${RENDERED_ENV_DIR}/${env_name}.env")" ;;
+    esac
     if dup_key="$(env_file_has_duplicate_keys "${env_target}")"; then
       die "${env_name}.env has a duplicate key: ${dup_key} (remove the duplicate; systemd EnvironmentFile is last-wins but validation reads the first occurrence)"
     fi
@@ -1910,14 +2007,14 @@ if [[ "${DEPLOY_INSTALL_SYSTEMD}" == "1" ]]; then
     validate_limit_monitor_state_dir
     # 8) CORS: hub.env の CORS_ALLOWED_ORIGINS が dashboard origin を含むか
     validate_dashboard_cors \
-      "$(env_file_or_rendered "${LIMIT_MONITOR_ETC_DIR}/hub.env" "${RENDERED_ENV_DIR}/hub.env")" \
-      "$(env_file_or_rendered "${LIMIT_MONITOR_ETC_DIR}/dashboard.env" "${RENDERED_ENV_DIR}/dashboard.env")"
+      "${HUB_ENV_FOR_DEPLOY}" \
+      "${DASHBOARD_ENV_FOR_DEPLOY}"
   fi
   if [[ "${INSTALL_COLLECTOR}" -eq 1 ]]; then
     # 9) collector token: symlink 拒否 / 非空 / root / mode 600(既存は上書きしない)
     validate_collector_token
     # 9a) token を service user が LoadCredential で読める配線になっているか
-    validate_collector_credential_wiring "${RENDERED_SYSTEMD_DIR}/limit-collector.service"
+    validate_collector_credential_wiring "${RENDERED_SYSTEMD_DIR}/limit-monitor-collector.service"
     # 10) vendor CLI: CODEX_BIN / CLAUDE_BIN を INSTALL_USER の環境で検証(Major 1)
     validate_collector_binaries \
       "$(env_file_or_rendered "${LIMIT_MONITOR_ETC_DIR}/collector.env" "${RENDERED_ENV_DIR}/collector.env")"
@@ -1936,7 +2033,15 @@ if [[ "${DEPLOY_INSTALL_SYSTEMD}" == "1" ]]; then
   # env の初期配置(INSTALL_DIR を deploy 値へ整合: 新規のみ render 配置、
   # 既存は非上書き + 不一致は検証フェーズ(6)で die 済み)
   if [[ "${INSTALL_SERVER}" -eq 1 ]]; then
-    ensure_env_install_dir "${REPO_ROOT}/deploy/hub.env.example" "${LIMIT_MONITOR_ETC_DIR}/hub.env" 0644
+    # Hub envは検証済みのtemporary内容を配置する。既存envでも
+    # CORS_ALLOWED_ORIGINSへのDashboard origin追加だけを反映し、他の値と
+    # 既存ファイルのmodeは保持する。
+    hub_env_mode=0644
+    if [[ -e "${LIMIT_MONITOR_ETC_DIR}/hub.env" ]]; then
+      hub_env_mode="$(stat -c '%a' "${LIMIT_MONITOR_ETC_DIR}/hub.env")"
+    fi
+    install -m "${hub_env_mode}" "${HUB_ENV_FOR_DEPLOY}" "${LIMIT_MONITOR_ETC_DIR}/hub.env"
+    log "installed synchronized ${LIMIT_MONITOR_ETC_DIR}/hub.env (Dashboard origin only)"
     ensure_env_install_dir "${REPO_ROOT}/deploy/dashboard.env.example" "${LIMIT_MONITOR_ETC_DIR}/dashboard.env" 0644
   fi
   if [[ "${INSTALL_COLLECTOR}" -eq 1 ]]; then
@@ -1954,30 +2059,37 @@ fi
 
 # --- release -----------------------------------------------------------------
 
-log "creating ${RELEASE_DIR}"
-# 親 releases/ と release dir の mode は明示 0755: service user が current
+log "creating ${VERSION_DIR}"
+# 親 versions/ と release dir の mode は明示 0755: service user が current
 # release を traverse できる必要がある。owner は deploy 実行ユーザー(root 時は
-# root)のまま(既存の releases/current 設計と一致)
-install -d -m 0755 "${RELEASES_DIR}"
-install -d -m 0755 "${RELEASE_DIR}"
-cp -a "${STAGE_DIR}/." "${RELEASE_DIR}/"
-# mktemp -d の STAGE_DIR は 0700 で、cp -a はその mode を既存の RELEASE_DIR へ
-# 伝播させる。cp -a の属性伝播に頼らず、ここだけで RELEASE_DIR を 0755 に確定させる
+# root)のまま(既存の versions/current 設計と一致)
+install -d -m 0755 "${VERSIONS_DIR}"
+if [[ "${FORCE_VERSION}" == "1" && ( -e "${VERSION_DIR}" || -L "${VERSION_DIR}" ) ]]; then
+  VERSION_BACKUP_DIR="${VERSIONS_DIR}/.${VERSION_ID}.backup.$$"
+  [[ ! -e "${VERSION_BACKUP_DIR}" && ! -L "${VERSION_BACKUP_DIR}" ]] \
+    || die "version backup path already exists: ${VERSION_BACKUP_DIR}"
+  mv -T -- "${VERSION_DIR}" "${VERSION_BACKUP_DIR}" \
+    || die "cannot stage existing version for --force replacement: ${VERSION_DIR}"
+fi
+install -d -m 0755 "${VERSION_DIR}"
+cp -a "${STAGE_DIR}/." "${VERSION_DIR}/"
+# mktemp -d の STAGE_DIR は 0700 で、cp -a はその mode を既存の VERSION_DIR へ
+# 伝播させる。cp -a の属性伝播に頼らず、ここだけで VERSION_DIR を 0755 に確定させる
 # (release 内部の file/dirs は staging 側で install -d / -m 644 / npm ci により
 # 既定の安全 mode で生成済み。過度に広げないため再帰 chmod は行わない)
-chmod 0755 "${RELEASE_DIR}"
+chmod 0755 "${VERSION_DIR}"
 
 # symlink の入れ替えは mv -T で atomic に行う
-log "pointing ${INSTALL_DIR}/current at ${RELEASE_ID}"
-ln -sfn "${RELEASE_DIR}" "${INSTALL_DIR}/.current.new"
+log "pointing ${INSTALL_DIR}/current at ${VERSION_ID}"
+ln -sfn "${VERSION_DIR}" "${INSTALL_DIR}/.current.new"
 mv -T "${INSTALL_DIR}/.current.new" "${INSTALL_DIR}/current"
 
 # 古い release を削除する(current の指す先は必ず残す)
 current_target="$(readlink -f "${INSTALL_DIR}/current")"
-mapfile -t old_releases < <(ls -1 "${RELEASES_DIR}" | sort -r | tail -n "+$((KEEP_RELEASES + 1))")
-for old in "${old_releases[@]:-}"; do
+mapfile -t old_versions < <(ls -1 "${VERSIONS_DIR}" | sort -r | tail -n "+$((KEEP_VERSIONS + 1))")
+for old in "${old_versions[@]:-}"; do
   [[ -n "${old}" ]] || continue
-  old_path="${RELEASES_DIR}/${old}"
+  old_path="${VERSIONS_DIR}/${old}"
   [[ "$(readlink -f "${old_path}")" != "${current_target}" ]] || continue
   log "pruning old release ${old}"
   rm -rf "${old_path}"
@@ -2146,4 +2258,4 @@ else
   log "  sudo systemctl restart $(selected_unit_templates | tr '\n' ' ')"
 fi
 
-log "done: ${INSTALL_DIR}/current -> ${RELEASE_DIR}"
+log "done: ${INSTALL_DIR}/current -> ${VERSION_DIR}"
