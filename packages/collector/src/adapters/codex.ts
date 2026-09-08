@@ -1,14 +1,19 @@
 import type { Observation } from 'shared/src/contracts'
 import { calcRemainingPercent } from 'shared/src/remaining'
+import { normalizeEpochOrIso } from '../lib/normalize-time.js'
 
 /**
  * Codex app-server `account/rateLimits/read` の応答のうち、collector が利用する
  * フィールドだけを表す型。CLI version 差はこの adapter 内へ閉じ込める。
  */
 export type CodexRateLimitWindow = {
-  usedPercent: number
+  // 実測の app-server 応答では常に数値だが、欠落した window を捨てられるよう
+  // optional として受け取り、非数値は bucket を作らない
+  usedPercent?: number | null
   windowDurationMins?: number | null
-  resetsAt?: string | null
+  // 実測の `account/rateLimits/read` は unix 秒(例: 1788274954)を返す。
+  // CLI version 差で ISO 文字列の場合もあるため両方を受ける
+  resetsAt?: string | number | null
 }
 
 export type CodexRateLimit = {
@@ -74,7 +79,7 @@ export function buildCodexObservation({
       })
       .map(([key, window]) => {
         // filter 済みだが型を絞るため再チェックする
-        if (window == null) {
+        if (window == null || typeof window.usedPercent !== 'number') {
           return null
         }
         const usedPercent = clampPercent(window.usedPercent)
@@ -84,7 +89,7 @@ export function buildCodexObservation({
           usedPercent,
           remainingPercent: calcRemainingPercent(usedPercent),
           windowDurationSeconds: window.windowDurationMins ? window.windowDurationMins * 60 : null,
-          resetsAt: window.resetsAt ?? null,
+          resetsAt: normalizeEpochOrIso(window.resetsAt),
           reached: usedPercent >= 100
         }
       })

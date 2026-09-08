@@ -1,33 +1,76 @@
-# Limit Monitor Collector systemd unit template (Phase 1: mock collector)
+# Limit Monitor Collector systemd unit template
 # 配置例: /etc/systemd/system/limit-collector.service
+#
+# 配置先は unit を書き換えずに EnvironmentFile で切り替える:
+#   sudo install -m 640 deploy/collector.env.example /etc/limit-monitor/collector.env
+#
 # token は平文 env ではなく systemd credential で注入する:
 #   sudo install -m 600 /dev/stdin /etc/limit-monitor/collector-token <<< '<token>'
+# ExecStart の node path(/usr/bin/node)は deploy/deploy.sh --install-systemd が
+# 実行環境の実際 path(command -v node)へ置換して render・配置する。
+# 手動で配置する場合は実 path へ書き換えること。
+#
+# 重要: real mode の collector は `codex` / `claude` CLI を実行し、その CLI が
+# 自分の HOME 配下の login 情報を読む。そのため
+#   - User= / Group= は Codex/Claude に login 済みのアカウントにすること
+#     (= deploy を実行した通常ユーザー。install user が collector を動かす)
+#   - ProtectHome= は有効にできない(CLI が HOME を読み書きする)
+# collector 自身は認証ファイルも transcript も直接読まない。
 [Unit]
-Description=Limit Monitor Collector (mock)
-After=network-online.target
-Wants=network-online.target
+Description=Limit Monitor Collector (Codex/Claude usage limits)
+After=network-online.target limit-hub.service
+Wants=network-online.target limit-hub.service
+# Hub への送信先が Hub service であるため、再起動時 Hub が先に立ち上がるよう
+# 順序を保証する。Wants= は Hub が存在しない環境でも collector 単体で起動可能に
+# 保つ(Requires= で Hub 不在時に collector も起動できなくなるのを避ける)。
 
 [Service]
+# Type=simple は安全な既定値(手動配置のデフォルト): 既定
+# COLLECTOR_INTERVAL_SECONDS=60(常駐送信)では systemctl start が即 return し、
+# is-active=active を確認できる。oneshot mode(interval=0)では
+# deploy/deploy.sh --install-systemd が env の interval に基づいて
+# Type=oneshot へ render する(start / restart が実処理終了までブロックし、
+# 返却後に Result=success / ExecMainStatus=0 を確認できる)。配置済み unit は
+# render 結果を正とする(手動で Type を入れ替えないこと。deploy は
+# systemd-analyze verify で検証し、失敗時は current を切替えない)。
 Type=simple
-User=limit-monitor
-Group=limit-monitor
-WorkingDirectory=/opt/limit-monitor/packages/collector
+# Codex/Claude に login しているアカウント(= deploy を実行した install user)へ
+# 置き換える。limit-monitor 専用の Linux user は作らないし前提にもしない。
+# deploy/deploy.sh --install-systemd が SUDO_USER(sudo -E 経由)または現在の
+# ユーザーから自動解決した user:group で placeholder を埋めた unit を配置する
+# (利用者に user / group の指定は求めない。root 直接で主体不明なら fail-closed)。
+# 手動で unit を置いた場合はここを実アカウントへ書き換えないと起動できない。
+User=CHANGE_ME
+Group=CHANGE_ME
+
+# 既定値。あとの EnvironmentFile が同じ変数を上書きする
+Environment=INSTALL_DIR=/var/www/limit-monitor
 Environment=HUB_URL=http://127.0.0.1:8787
-# token を発行した sourceId と一致させる(hostname を自動送信しない)。
-# accountAlias は token 発行時にHubへ紐付くため、collector側では設定しない。
+# 既定は real。fixture 送信は COLLECTOR_MODE=mock を明示した場合だけ
+Environment=COLLECTOR_MODE=real
 Environment=SOURCE_ID=dev-machine
 Environment=COLLECTOR_INTERVAL_SECONDS=60
 Environment=COLLECTOR_PROVIDERS=codex,claude
+EnvironmentFile=-/etc/limit-monitor/collector.env
+
+# token file は root:root mode 600 のまま置く。systemd(PID 1 = root)が読み、
+# unit ごとの credential directory へ上記 User= 所有・mode 0400 で複製するため、
+# service user に token file 自体の read 権限は不要(与えてもいけない)。
 LoadCredential=hub-token:/etc/limit-monitor/collector-token
 Environment=HUB_TOKEN_FILE=%d/hub-token
-ExecStart=/usr/bin/node dist/src/index.js
-Restart=always
-RestartSec=10
+
+WorkingDirectory=/
+ExecStart=/usr/bin/node ${INSTALL_DIR}/current/packages/collector/dist/src/index.js
+# on-failure にする: COLLECTOR_INTERVAL_SECONDS=0 の oneshot は成功時 0 終了で
+# 終わり、systemd が再実行すると「1 回だけ送信」の契約と矛盾する。
+# 常駐でもクラッシュ(非 0 終了 / signal)時のみ再試行したい。
+Restart=on-failure
+RestartSec=30
 
 # hardening
+# vendor CLI が HOME の login 情報を読むため ProtectHome は無効にする
 NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
+ProtectHome=false
 PrivateTmp=true
 
 [Install]

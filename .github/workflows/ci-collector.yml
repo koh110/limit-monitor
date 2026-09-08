@@ -1,10 +1,9 @@
-name: CI hub
+name: CI collector
 
 on:
   push:
     paths:
-      - 'packages/hub/**'
-      - 'deploy/**'
+      - 'packages/collector/**'
       - 'packages/shared/**'
       - 'package.json'
       - 'package-lock.json'
@@ -12,16 +11,15 @@ on:
     branches: [ main ]
   pull_request:
     paths:
-      - '.github/workflows/ci-hub.yml'
-      - 'packages/hub/**'
-      - 'deploy/**'
+      - '.github/workflows/ci-collector.yml'
+      - 'packages/collector/**'
       - 'packages/shared/**'
       - 'package.json'
       - 'package-lock.json'
       - 'vite.config.ts'
 
 env:
-  WORKSPACE_NAME: hub
+  WORKSPACE_NAME: collector
 
 jobs:
   test:

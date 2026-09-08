@@ -1,99 +1,136 @@
 # limit-monitor
 
-Codex CLI / Claude Code の利用上限を各ホストで収集し、自宅サーバーの Limit Hub へ集約して
-Web Dashboard / Stream Deck / iPhone から確認するための基盤。
-
-仕様の詳細は `docs/architecture.md` と `docs/decisions.md` を参照。
+Codex CLI / Claude Code の利用上限を収集し、Hub APIとWeb Dashboardで確認するNode.jsアプリケーションです。
 
 ## 構成
 
-| package | 役割 |
-| --- | --- |
-| `packages/shared` | API 契約(TypeSpec)と生成型、Observation/Status の zod schema、freshness/残量計算、Drizzle DB schema |
-| `packages/hub` | Limit Hub。Hono + @hono/node-server。Ingest/Status API、SQLite 永続化 |
-| `packages/client` | Web Dashboard。Vite + React + react-router(data loader)。ブラウザから Hub へ直接 CORS 経由でアクセスする SPA |
-| `packages/collector` | Collector。Phase 1 では Codex/Claude fixture を送信する Linux mock collector |
+```text
+Codex CLI / Claude Code
+        │
+        ▼
+limit-collector ──▶ limit-hub ──▶ limit-dashboard
+                    SQLite       React SPA
+```
 
-- ランタイム: Node.js 24.x
-- DB: SQLite(Node `node:sqlite`)+ Drizzle ORM(`drizzle-orm/node-sqlite`)
-- API 契約: TypeSpec → OpenAPI 3.1 → `openapi-typescript`(`packages/shared`)
-- ツールチェーン: npm workspaces + TypeScript + vite-plus(`vp test` / `vp fmt` / `vp lint`)
+- `limit-collector`: ローカルのCodex / Claude CLIから実値を取得してHubへ送信
+- `limit-hub`: 認証、観測値の保存、Dashboard向けAPI
+- `limit-dashboard`: Hub APIを表示するWeb Dashboard
 
-## セットアップ
+既定ではmock値を使いません。fixtureを使う場合だけ`COLLECTOR_MODE=mock`を明示します。
+
+## 必要環境
+
+- Node.js 24.x
+- npm
+- Codex CLI / Claude Code（Collectorを使う場合）
+- Collectorを実行するユーザーでCodex / Claudeへlogin済みであること
+
+## 開発環境
 
 ```bash
 npm ci
-npm run build -w shared        # TypeSpec のコンパイルと型生成を含む
+npm run build --workspaces --if-present
+npm run test --workspaces --if-present
 ```
 
-依存を追加・更新するときは `npm install --force` を使う。`openapi-typescript@7` の
-peer が `typescript@^5.x` で本リポジトリの `typescript@6` と衝突するためで、
-`--legacy-peer-deps` は vite/rolldown の peer を落としてしまうので使わない。
-CI の `npm ci` は lockfile どおりに動くため影響を受けない。
-
-### Hub の起動
+Hubを起動:
 
 ```bash
-npm run db-migrate -w hub          # migration の適用(起動時にも自動適用される)
-npm run dev:hub                    # http://0.0.0.0:8787
+npm run db-migrate -w hub
+npm run dev:hub
+# http://127.0.0.1:8787
 ```
 
-### Collector token の発行
+Dashboardを起動:
 
 ```bash
-npm run tokens -w hub -- issue --source-id dev-machine --account-alias main
+npm run dev:dashboard
+# http://localhost:5173
 ```
 
-`sourceId` と`accountAlias`の組み合わせごとにtokenを発行する。同じsourceで複数アカウントを収集する場合は、accountAliasごとに別tokenを発行する。
-平文 token は発行時に1回だけ表示され、Hubにはhashのみ保存される。accountAliasはtokenからHub側で確定するため、collector側の設定は不要。
-
-### mock collector の実行(Phase 1)
+Collectorを手動起動する場合は、Hub tokenを環境変数で渡します。
 
 ```bash
-HUB_TOKEN=<発行した token> SOURCE_ID=dev-machine npm run start -w collector
+HUB_TOKEN=<token> \
+SOURCE_ID=<source-id> \
+npm run start -w collector
 ```
 
-Codex / Claude の fixture 観測値が Hub へ送信される。
-
-### Dashboard の起動
+実CLIから収集する既定モード:
 
 ```bash
-npm run dev:client                 # http://localhost:5173
+COLLECTOR_MODE=real
 ```
 
-Dashboard はブラウザから Hub へ直接 fetch する SPA(reverse proxy なし)。Hub の URL は
-build 時に焼き込まれる環境変数 `VITE_HUB_BASE_URL` で指定する(既定: `http://127.0.0.1:8787`)。
-Hub 側では、この Dashboard の origin を `CORS_ALLOWED_ORIGINS` に許可 origin として設定する必要がある
-(開発時の既定 origin は `http://localhost:5173`)。
-
-## API 契約(TypeSpec)
-
-API 契約の単一ソースは `packages/shared/main.tsp` と `packages/shared/typespec/*.tsp`。
+明示的にmockを使う場合:
 
 ```bash
-npm run compile -w shared      # tsp compile(tsp-output/schema/openapi.yaml を生成)
-npm run openapi-ts -w shared   # OpenAPI から src/generated/schema.ts を生成
-npm run format-tsp -w shared   # *.tsp の整形(format の前段で自動実行)
+COLLECTOR_MODE=mock HUB_TOKEN=<token> SOURCE_ID=<source-id> \
+  npm run start -w collector
 ```
 
-`npm run build -w shared` の prebuild で上記の生成が自動実行される。生成型は
-`shared/src/schema` から参照し、Hub の route / validator / response を `satisfies` で
-契約に固定する。runtime の入力検証は従来どおり zod/mini(`shared/src/contracts`)が行う。
-詳細と既知の限界は `docs/architecture.md` を参照。
+## Deploy
 
-## 開発コマンド
-
-各 package で共通:
+正規の入口はリポジトリrootの`deploy.ts`です。
 
 ```bash
-npm run format-check -w <pkg>
-npm run lint -w <pkg>
-npm run build -w <pkg>
-npm run test-ci -w <pkg>
+# Hub + Dashboard
+VITE_HUB_BASE_URL=http://127.0.0.1:8787 \
+  sudo -E ./deploy.ts --server
+
+# Collector
+VITE_HUB_BASE_URL=http://127.0.0.1:8787 \
+  sudo -E ./deploy.ts --collector
+
+# 全サービス
+VITE_HUB_BASE_URL=http://127.0.0.1:8787 \
+  sudo -E ./deploy.ts --server --collector
 ```
 
-Vitest / Prettier を直接実行せず、必ず `vp test` / `vp fmt` / `vp lint` を経由する。
+`--server`はHubとDashboard、`--collector`はCollectorを対象にします。何も指定しない場合や未知の引数は失敗します。
 
-## 運用
+Deployを実行した通常ユーザーが、3サービスのsystemd実行ユーザーになります。専用Linux userやgroupを作成する必要はありません。`sudo`経由では`SUDO_USER`とそのprimary groupを自動解決します。rootへ直接loginして実行する場合は、主体を特定できないため拒否されます。
 
-systemd unit template は `deploy/systemd/` を参照。手順は `docs/operations.md`。
+初回は、通常ユーザーでbuildを作成してからdeployします。
+
+```bash
+VITE_HUB_BASE_URL=http://127.0.0.1:8787 \
+  ./deploy/deploy.sh --prepare-build
+
+VITE_HUB_BASE_URL=http://127.0.0.1:8787 \
+  sudo -E ./deploy.ts --server --collector
+```
+
+Collectorをdeployする場合、同じinstallユーザーでCodex / Claude CLIへlogin済みである必要があります。既存のenv、token、手編集されたsystemd unitはdeployで黙って上書きしません。
+
+初回token bootstrap、環境変数、rollback、CORS、systemd状態確認は[`docs/operations.md`](docs/operations.md)を参照してください。
+
+## サービスと既定ポート
+
+- Hub: `127.0.0.1:8787`
+- Dashboard: `127.0.0.1:3000`
+- Collector: listenなし
+
+DashboardはNode.js組み込みHTTP serverで配信するため、nginxは必須ではありません。LANへ公開する場合はDashboardのbind address、public origin、HubのCORSを明示的に一致させてください。
+
+## API契約
+
+APIの正本はTypeSpecです。
+
+```bash
+npm run compile -w shared
+npm run openapi-ts -w shared
+```
+
+通常は`npm run build -w shared`から自動実行されます。
+
+## ドキュメント
+
+- [Architecture](docs/architecture.md)
+- [Operations / Deploy](docs/operations.md)
+- [Decisions](docs/decisions.md)
+- [Security](SECURITY.md)
+
+## License
+
+未定義です。公開前にLICENSEを追加してください。

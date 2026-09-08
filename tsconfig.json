@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "target": "esnext",
+    "lib": ["ESNext"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "skipLibCheck": true,
+    "noUncheckedIndexedAccess": true,
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "verbatimModuleSyntax": true
+  },
+  "include": ["deploy.ts"],
+  "exclude": ["node_modules", "dist", "packages"]
+}

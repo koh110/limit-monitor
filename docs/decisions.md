@@ -11,6 +11,7 @@
 | Hub の配置 | 自宅 Linux 開発機 | 既存サーバーを流用し LAN 直結を優先 |
 | Hub listen port | `8787` | 仕様書の推奨例に従う |
 | 常駐方式 | systemd 主運用 | Docker Compose より単純で、Node 単体で完結する |
+| service 実行ユーザー | 専用 Linux user を作らず、install を実行した通常ユーザー(`sudo -E` の `SUDO_USER`、非 root なら現在のユーザー)へ 3 unit / state dir / token CLI を統一する。user / group の指定入口(option・環境変数)は持たず、主体不明なら fail-closed | OSS 利用者の環境に固定アカウントを増やさない。real mode の collector は `codex` / `claude` CLI を起動し CLI 自身が HOME 配下の login 情報を読むため、実際に login 済みのアカウントで動かす必要がある |
 | Web framework | Hono + `@hono/node-server` | service-template 準拠 |
 | Dashboard | Vite + React + react-router data-loader + 直接 CORS fetch | service-template 準拠 |
 | monorepo | npm workspaces(`packages/*`) | service-template 準拠 |
