@@ -296,7 +296,7 @@ resolve_install_identity() {
     user="$(id -un)"
     origin="current user"
   else
-    die "cannot determine the install user: running as root without SUDO_USER. Re-run through sudo from your normal account (e.g. 'sudo -E ./deploy.ts --server --collector'). limit-monitor never creates or assumes a dedicated Linux user, and there is no option to name one"
+    die "cannot determine the install user: running as root without SUDO_USER. Re-run through sudo from your normal account (e.g. 'sudo ./deploy.ts --hub-base-url <url> --server --collector'). limit-monitor never creates or assumes a dedicated Linux user, and there is no option to name one"
   fi
 
   is_valid_unix_name "${user}" \
