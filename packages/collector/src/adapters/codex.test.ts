@@ -132,3 +132,50 @@ test('有効な window がなければ null を返す', () => {
     })
   ).toBe(null)
 })
+
+test('実測の unix 秒 resetsAt を ISO へ正規化する', () => {
+  const observation = buildCodexObservation({
+    ...base,
+    payload: {
+      rateLimitsByLimitId: {
+        codex: {
+          limitId: 'codex',
+          primary: { usedPercent: 13, windowDurationMins: 300, resetsAt: 1788274954 },
+          secondary: { usedPercent: 27, windowDurationMins: 10080, resetsAt: 1788747931 }
+        }
+      }
+    }
+  })
+  expect(observation?.buckets[0]).toMatchObject({
+    bucketId: 'codex:codex:primary',
+    resetsAt: '2026-09-01T15:02:34.000Z'
+  })
+  expect(observation?.buckets[1]).toMatchObject({
+    bucketId: 'codex:codex:secondary',
+    resetsAt: '2026-09-07T02:25:31.000Z'
+  })
+})
+
+test('解釈できない resetsAt は null にして bucket は残す', () => {
+  const observation = buildCodexObservation({
+    ...base,
+    payload: {
+      rateLimits: {
+        limitId: 'codex_default',
+        primary: { usedPercent: 10, windowDurationMins: 300, resetsAt: 'not a date' }
+      }
+    }
+  })
+  expect(observation?.buckets[0]).toMatchObject({ usedPercent: 10, resetsAt: null })
+})
+
+test('usedPercent が数値でない window は bucket にしない', () => {
+  expect(
+    buildCodexObservation({
+      ...base,
+      payload: {
+        rateLimits: { limitId: 'codex_default', primary: { usedPercent: null } }
+      }
+    })
+  ).toBe(null)
+})

@@ -1,5 +1,6 @@
 import type { Observation } from 'shared/src/contracts'
 import { calcRemainingPercent } from 'shared/src/remaining'
+import { normalizeEpochOrIso } from '../lib/normalize-time.js'
 
 /**
  * Claude Code statusLine JSON のうち、collector が利用するフィールドだけを表す型。
@@ -21,17 +22,6 @@ const CLAUDE_WINDOWS = [
   { key: 'five_hour', label: '5h', windowDurationSeconds: 5 * 60 * 60 },
   { key: 'seven_day', label: '7d', windowDurationSeconds: 7 * 24 * 60 * 60 }
 ] as const
-
-// resets_at は CLI version により unix 秒または ISO 文字列で渡される
-function normalizeResetsAt(resetsAt: string | number | null | undefined): string | null {
-  if (resetsAt == null) {
-    return null
-  }
-  if (typeof resetsAt === 'number') {
-    return new Date(resetsAt * 1000).toISOString()
-  }
-  return resetsAt
-}
 
 function clampPercent(value: number): number {
   return Math.min(100, Math.max(0, value))
@@ -69,7 +59,7 @@ export function buildClaudeObservation({
       usedPercent,
       remainingPercent: calcRemainingPercent(usedPercent),
       windowDurationSeconds: window.windowDurationSeconds,
-      resetsAt: normalizeResetsAt(raw.resets_at),
+      resetsAt: normalizeEpochOrIso(raw.resets_at),
       reached: usedPercent >= 100
     }
   }).filter((bucket) => {
