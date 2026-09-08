@@ -18,7 +18,7 @@ flowchart TD
 - Hub は自宅 Linux サーバー(開発機)上で systemd により常駐する
 - Hub / Dashboard / Collector の 3 unit は **deploy を実行した通常ユーザー
   (install user)** として動く。limit-monitor 専用の Linux user は作らず、
-  利用者に user / group を指定させない(`sudo -E` の `SUDO_USER`、または非 root
+  利用者に user / group を指定させない(`sudo` の SUDO_USER、または非 root
   実行時の現在のユーザーから自動解決し、主体不明なら fail-closed)
 - Cloudflare はアプリ実行基盤・永続化先として使わず、iPhone からの private route のみに使う
 - Phase 1 の collector は real 実行(既定 `COLLECTOR_MODE=real`)。
@@ -136,7 +136,7 @@ main.tsp --(tsp compile)--> tsp-output/schema/openapi.yaml
 Ingest の保護:
 
 - リクエストボディ上限 32KB(413)
-- token 認証失敗 401 / sourceId mismatch 403
+- token 認証失敗 401。認証成功後の`sourceId`はtokenに紐付く値へHub側で正規化する
 - sourceId 単位の in-memory fixed window rate limit(429)
 
 ## CORS(ブラウザ直接アクセス)
@@ -155,7 +155,7 @@ Hub 側で CORS を明示的に許可する必要がある(`packages/hub/src/con
 - 許可するのは「ブラウザが実際に送る origin」であり、Dashboard の bind address
   (`HOST`、例: `0.0.0.0`)ではない。LAN bind の場合は
   `dashboard.env` の `DASHBOARD_PUBLIC_ORIGIN` に相当する値を設定する
-  (localhost 既定 bind `HOST=127.0.0.1` のみ `http://127.0.0.1:3000` が導出される)
+  (localhost 既定 bind `HOST=127.0.0.1` のみ `http://127.0.0.1:8788` が導出される)
 - Collector からの ingest リクエストのように `Origin` header がない場合は
   CORS ヘッダーを付けない(CORS はブラウザ間のみの制約であり、Bearer token 認証とは独立)
 

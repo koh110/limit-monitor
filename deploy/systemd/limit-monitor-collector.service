@@ -1,5 +1,5 @@
 # Limit Monitor Collector systemd unit template
-# 配置例: /etc/systemd/system/limit-collector.service
+# 配置例: /etc/systemd/system/limit-monitor-collector.service
 #
 # 配置先は unit を書き換えずに EnvironmentFile で切り替える:
 #   sudo install -m 640 deploy/collector.env.example /etc/limit-monitor/collector.env
@@ -18,8 +18,8 @@
 # collector 自身は認証ファイルも transcript も直接読まない。
 [Unit]
 Description=Limit Monitor Collector (Codex/Claude usage limits)
-After=network-online.target limit-hub.service
-Wants=network-online.target limit-hub.service
+After=network-online.target limit-monitor-hub.service
+Wants=network-online.target limit-monitor-hub.service
 # Hub への送信先が Hub service であるため、再起動時 Hub が先に立ち上がるよう
 # 順序を保証する。Wants= は Hub が存在しない環境でも collector 単体で起動可能に
 # 保つ(Requires= で Hub 不在時に collector も起動できなくなるのを避ける)。
@@ -36,7 +36,7 @@ Wants=network-online.target limit-hub.service
 Type=simple
 # Codex/Claude に login しているアカウント(= deploy を実行した install user)へ
 # 置き換える。limit-monitor 専用の Linux user は作らないし前提にもしない。
-# deploy/deploy.sh --install-systemd が SUDO_USER(sudo -E 経由)または現在の
+# deploy/deploy.sh --install-systemd が SUDO_USER(sudo 経由)または現在の
 # ユーザーから自動解決した user:group で placeholder を埋めた unit を配置する
 # (利用者に user / group の指定は求めない。root 直接で主体不明なら fail-closed)。
 # 手動で unit を置いた場合はここを実アカウントへ書き換えないと起動できない。

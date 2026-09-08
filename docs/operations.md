@@ -13,13 +13,13 @@
 
 ## release 構成
 
-`deploy/deploy.sh` は release ディレクトリと symlink で配置する:
+`deploy/deploy.sh` は version ディレクトリと symlink で配置する:
 
 ```text
 /var/www/limit-monitor/
-  releases/20260901114248-d87911f/   # build 済み artifact + 本番依存のみの node_modules
-  releases/20260830093011-a1b2c3d/
-  current -> releases/20260901114248-d87911f
+  versions/0.1.0/   # package.json の version に対応する build 済み artifact + 本番依存のみの node_modules
+  versions/0.0.1/
+  current -> versions/0.1.0
 ```
 
 systemd unit と Node.js dashboard service は常に `current` を参照する。`current` の入れ替えは
@@ -28,7 +28,9 @@ systemd unit と Node.js dashboard service は常に `current` を参照する�
 
 ## deploy
 
-利用者向けの入口はリポジトリ root の `./deploy.ts` だけで、対象サービスを明示する:
+利用者向けの入口はリポジトリ root の `./deploy.ts` だけで、対象サービスを明示する。
+**clean hostの初回構築では、下の「初期構築」Phase 0でstate directory・DB・tokenを準備してからdeployする。**
+build manifestが無い、またはsource / lockfile / artifactが古い場合は、deployが`SUDO_USER`の通常ユーザーとして`--prepare-build`を自動実行する。
 
 ```bash
 sudo ./deploy.ts --hub-base-url <url> --server              # Hub + Dashboard
@@ -37,17 +39,32 @@ sudo ./deploy.ts --hub-base-url <url> --server --collector  # 全サービス
 ```
 
 ```bash
-# repository の checkout(build 環境)で実行する(初回 clean host の場合は先に
-# Phase 0「初回 collector token bootstrap」の 0-0 → 0-5 を済ませること)
+# repositoryのcheckout rootで、通常ユーザーとして実行
+# clean hostでも、ここで手動prepare-buildする必要はない。
+# sudo deploy時にbuildが必要なら、SUDO_USERとして自動実行される。
 git pull
-# build は分離して先に非 root ユーザーで行う(推奨。script が stale build を検出したら
-# SUDO_USER として自動再実行するが、SUDO_USER 無い root シェルでは fail-closed):
-#   VITE_HUB_BASE_URL=http://limit-monitor.local:8787 deploy/deploy.sh --prepare-build
-VITE_HUB_BASE_URL=http://limit-monitor.local:8787 sudo ./deploy.ts --hub-base-url <url> --server --collector
+sudo ./deploy.ts --hub-base-url <url> --server --collector
+```
+
+自動prepare-buildはrootでは実行せず、`sudo`を呼び出した`SUDO_USER`として
+`npm ci`と全workspace buildを実行する。`SUDO_USER`がないroot直接実行では、
+通常ユーザーを特定できないためfail-closedで停止する。自動実行を待たずに手動で
+buildしたい場合は、通常ユーザーで次を実行できる:
+
+```bash
+VITE_HUB_BASE_URL=http://127.0.0.1:8787 deploy/deploy.sh --prepare-build
 ```
 
 `--server` / `--collector` のどちらも指定しなければ何も deploy しない(fail-closed)。
 未知の引数も同様に拒否する。`--dry-run` は委譲先コマンドを表示するだけ。
+同じ `package.json` version を再配置する場合だけ、明示的に `--force` を付ける:
+
+```bash
+sudo ./deploy.ts --server --collector --force --hub-base-url <url>
+```
+
+`--force` なしでは既存の version directory を置き換えず、`--force` 指定時も
+通常どおり全検証を完了してから対象 directory を再作成する。
 
 **service 実行ユーザー(install user)を利用者に指定させない。** 入口にも
 `deploy/deploy.sh` にも `--user` / `--group` option は無く、ユーザー指定の環境変数
@@ -59,8 +76,8 @@ VITE_HUB_BASE_URL=http://limit-monitor.local:8787 sudo ./deploy.ts --hub-base-ur
 fail-closed)。identity は同じ規則で自動解決される:
 
 ```bash
-VITE_HUB_BASE_URL=http://limit-monitor.local:8787 \
-  sudo -E deploy/deploy.sh --install-systemd --services server,collector
+VITE_HUB_BASE_URL=http://127.0.0.1:8787 \
+  sudo ./deploy.ts --hub-base-url <url> --server --collector --services server,collector
 ```
 
 ### service 実行ユーザー(install user)
@@ -89,14 +106,15 @@ HOME 配下の login 情報を読むため)。
 | --- | --- | --- |
 | `INSTALL_DIR` / `--install-dir` | `/var/www/limit-monitor` | release 配置先(絶対 path 必須) |
 | `VITE_HUB_BASE_URL` / `--hub-base-url` | **必須** | Dashboard に焼き込む Hub の URL |
-| `RELEASE_ID` | `<UTC timestamp>-<git short sha>` | release ディレクトリ名 |
-| `KEEP_RELEASES` / `--keep-releases` | `5` | 残す過去 release 数(1 以上) |
+| `package.json` の `version` | 例: `0.1.0` | version ディレクトリ名。deployごとにversionを更新する |
+| `KEEP_VERSIONS` / `--keep-versions` | `5` | 残す過去 version 数(1 以上) |
+| `--force` | 無効 | 同じ `package.json` version の既存 version directory を明示的に置き換える |
 | `DEPLOY_RESTART` / `--restart` | `0`(再起動しない) | systemd service を再起動する |
 | `DEPLOY_INSTALL_SYSTEMD` / `--install-systemd` | `0` | unit render・検証・配置、daemon-reload、enable/start/restart を行う |
 | `DEPLOY_PREPARE_BUILD` / `--prepare-build` | - | 非 root のみ。`npm ci` + 全 workspace build + `VITE_HUB_BASE_URL` での Dashboard build + build manifest 生成で終了(staging / systemd なし)。root では die。`sudo` + `--install-systemd` 実行時は script が先に SUDO_USER として自動再実行する |
 | `DEPLOY_SERVICES` / `--services` | `server,collector` | 対象サービス(`server` = hub + dashboard、`collector`)。`./deploy.ts` は `--server` / `--collector` から明示的に渡す。空 / 未知 / 重複は fail-closed |
 | `SKIP_NPM_CI` / `--skip-npm-ci` | `0` | `npm ci` を省略する |
-| `HUB_SERVICE` / `DASHBOARD_SERVICE` / `COLLECTOR_SERVICE` | `limit-hub` / `limit-dashboard` / `limit-collector` | 対象 unit 名(**既定値のみ対応**。カスタム名は unit 名 / 依存関係と連動しないため fail-closed で事前拒否) |
+| `HUB_SERVICE` / `DASHBOARD_SERVICE` / `COLLECTOR_SERVICE` | `limit-monitor-hub` / `limit-monitor-dashboard` / `limit-monitor-collector` | 対象 unit 名(**既定値のみ対応**。カスタム名は unit 名 / 依存関係と連動しないため fail-closed で事前拒否) |
 
 `deploy/deploy.env` を置くと同じ変数をファイルで与えられる(環境変数が優先)。
 
@@ -105,15 +123,15 @@ script は fail closed で、次のいずれかを満たさない場合は**何�
 - `INSTALL_DIR` が絶対 path でない / `/` である
 - `VITE_HUB_BASE_URL` が未設定、または `http(s)://` で始まらない
 - `node` / `npm` / `git` などの必須 tool が無い
-- 同じ `RELEASE_ID` の release が既に存在する
-- build artifact(`dist`)が生成されていない
+- 同じ `package.json` の `version` の version directory が既に存在する(`--force` なし)
+- build manifest / artifactが無い、またはsource / lockfile / artifact digestが古い状態のまま自動prepare-build後も一致しない
 - `--prepare-build` が root で実行された(npm は決して root で実行しない)
 - SUDO_USER 無い root シェル(root 直接)で既存の build manifest / artifacts が無い(npm を実行しない。先に通常ユーザーで `--prepare-build` を実行する)
 - staging での本番依存 install、または entrypoint の import 検証に失敗した
 - `--services` が空 / 未知の target / 重複を含む(対象サービスの選択は常に明示)
 - 廃止した `COLLECTOR_USER` / `COLLECTOR_GROUP` / `LIMIT_MONITOR_INSTALL_USER` / `LIMIT_MONITOR_INSTALL_GROUP` が環境や `deploy/deploy.env` に設定されている(黙って無視せず拒否する)
 - `--install-systemd` 時に install user を解決できない(root 直接で `SUDO_USER` が無い)、または解決した user が uid 0 / 実在しない / home directory が無い、その primary group を `getent group` で引けない
-- `HUB_SERVICE` / `DASHBOARD_SERVICE` / `COLLECTOR_SERVICE` が既定値(`limit-hub` / `limit-dashboard` / `limit-collector`)と異なる(カスタム unit 名は未対応のため事前拒否)
+- `HUB_SERVICE` / `DASHBOARD_SERVICE` / `COLLECTOR_SERVICE` が既定値(`limit-monitor-hub` / `limit-monitor-dashboard` / `limit-monitor-collector`)と異なる(カスタム unit 名は未対応のため事前拒否)
 - `--install-systemd` 時に render 済み unit に `CHANGE_ME` placeholder が残る、または ExecStart が存在しない node path を指す
 - `--install-systemd` 時に `systemd-analyze verify` が失敗する(警告には落とさない)
 - `--install-systemd` 時に `/etc/limit-monitor/{hub,dashboard,collector}.env`、`collector-token`、Hub の CORS 設定に不整合がある
@@ -139,9 +157,10 @@ release にも旧 unit にも触れず、`current` は変更されない。
 Dashboard は reverse proxy を介さずブラウザから Hub を直接叩く SPA なので、
 Hub の URL は Vite の static build に焼き込まれる。`VITE_HUB_BASE_URL` を
 変更したら **必ず deploy をやり直す**(既存 release の差し替えでは変わらない)。
-
-`VITE_HUB_BASE_URL` の origin は Hub の `CORS_ALLOWED_ORIGINS` と整合させる必要がある
-(CORS は完全一致のため `localhost` と `127.0.0.1` は別 origin)。
+`--hub-base-url`を指定したdeployでは、既存`dashboard.env`の
+`DASHBOARD_PUBLIC_ORIGIN`(未指定のlocalhost bindならHOST/PORTから導出)を読み取り、
+そのoriginが`hub.env`の`CORS_ALLOWED_ORIGINS`に無ければ自動追加する。Hub envの
+他の値、DashboardのHOST/PORT、token、DB pathは変更しない。
 
 ## 初期構築
 
@@ -149,10 +168,19 @@ Hub の URL は Vite の static build に焼き込まれる。`VITE_HUB_BASE_URL
 
 `--install-systemd` は `collector-token`(root 所有・mode 600)と
 `/var/lib/limit-monitor`(install user 所有・mode 0755)を**事前検証**し、
-無い・不一致なら current 切替前に die する(fail-closed)。一方 token は Hub の DB
-への書き込みで発行されるため、初回は「deploy 前に token を発行する」循環になる。
-次の手順の順序で解く。コマンドは repository checkout のルートで実行する
-(0-3 は checkout の絶対 path を使うため cwd に依存しない)。
+無い・不一致なら current 切替前に die する(fail-closed)。初回は次の順番で実行する:
+
+1. 実 git checkoutを、deployを実行する通常ユーザーが読取・書込できる場所に配置
+2. rootでstate directoryをinstall user所有に作成
+3. install userでDB migrationとHub token発行
+4. rootで`/etc/limit-monitor/collector-token`を配置
+5. `sudo ./deploy.ts --server --collector --hub-base-url <url>`を実行する
+   (buildが未生成・古い場合は、このdeployがinstall userとして自動prepare-buildする)
+
+`--prepare-build`を手動で先に実行する必要はない。tokenを配置する前にdeployを
+実行すると、unit配置前に`missing collector token`で停止する。
+次の詳細手順はすべてrepository checkoutのrootで実行する
+(0-3はcheckoutの絶対pathを使うためcwdに依存しない)。
 
 install user(= deploy を実行する自分の通常ユーザー)と group は次で確認できる:
 
@@ -203,8 +231,8 @@ install user が traverse でき、checkout 内のファイルを read できる
 - checkout directory と内部(`.git` / `node_modules` / `dist`)の所有が
   build user でない場合(例: root 所有の copy が残った場合)、
   `chown` で所有者を **安全に build user へ設定**する。
-- **root で npm を実行しない**。配置後の build(0-1 の `--prepare-build`)は
-  通常ユーザーで行う。
+- **root で npm を実行しない**。手動でbuildする場合は0-1を通常ユーザーで行う。
+  手動buildを省略した場合は、systemd deployが`SUDO_USER`として自動実行する。
 
 例(placeholder path を実際の配置先へ置き換える):
 
@@ -214,24 +242,25 @@ sudo install -d -m 0755 /srv/limit-monitor
 # (git clone するか、.env 等を除外した git checkout のコピー。source-only copy は不可)
 # 配置後、checkout directory と node_modules / dist が build user が所有・書込み
 # 可能であることを確認する(chown が必要なら所有者を build user へ設定)
-# 配置後はその checkout で 0-1 の --prepare-build を通常ユーザー(非 root)で実行する
+# 配置後、必要ならその checkout で 0-1 の --prepare-build を通常ユーザー(非 root)で実行する
+# 手動実行しない場合は、sudo deployがSUDO_USERとして自動実行する
 ```
 
-#### 0-1. 非 root で `--prepare-build`(npm を root で実行しない)
+#### 0-1. 手動で `--prepare-build`する場合(任意、npm を root で実行しない)
 
 0-0 で配置した **実 git checkout(`.git` を含む)で、build user(通常ユーザー)として
 実行する**(`node_modules` / `dist` がそのユーザーに書込み可能であること):
 
 ```bash
-VITE_HUB_BASE_URL=http://limit-monitor.local:8787 deploy/deploy.sh --prepare-build
+VITE_HUB_BASE_URL=http://127.0.0.1:8787 deploy/deploy.sh --prepare-build
 ```
 
 `npm ci` + 全 workspace build + `VITE_HUB_BASE_URL` での Dashboard build + build
 manifest 生成(`git ls-files` による source digest を含む)で終了する。root では
 die する(許可しない)。build manifest が
-stale(無い / digest 不一致)のとき `sudo -E ... --install-systemd` を実行すると
-script が `SUDO_USER` として自動再実行するが、SUDO_USER 無い root シェルでは
-fail-closed で die するため、**初回は必ず非 root で先に実行する**。
+stale(無い / digest 不一致)のとき `sudo ./deploy.ts --hub-base-url <url> --install-systemd` を実行すると
+script が `SUDO_USER` として自動再実行する。SUDO_USER 無い root シェルでは
+fail-closed で die するため、通常ユーザー経由の `sudo` でdeployすること。
 
 #### 0-2. root で state dir を install user 所有に初期化する
 
@@ -256,10 +285,15 @@ StateDirectory の既定値と一致)。deploy.sh 側でも同値で事前検証
 通常は checkout でそのまま実行すればよい(`sudo` も `runuser` も要らない):
 
 ```bash
+SOURCE_ID=dev-machine
+ACCOUNT_ALIAS=local
 DB_FILE_PATH=/var/lib/limit-monitor/limit-monitor.sqlite npm run -s db-migrate -w hub
 DB_FILE_PATH=/var/lib/limit-monitor/limit-monitor.sqlite \
-  npm run -s tokens -w hub -- issue --source-id <sourceId> --account-alias <accountAlias>
+  npm run -s tokens -w hub -- issue \
+  --source-id "$SOURCE_ID" --account-alias "$ACCOUNT_ALIAS"
 ```
+
+`SOURCE_ID` は後で配置される `collector.env` の `SOURCE_ID` と同じ値にする。
 
 別アカウントの shell から実行する場合だけ install user へ切り替える
 (`<install-user>` は 0-2 で state dir の owner にしたアカウント。placeholder
@@ -270,12 +304,16 @@ sudo -u <install-user> -- env \
   HOME=/home/<install-user> \
   PATH="/usr/local/bin:/usr/bin:/bin" \
   DB_FILE_PATH=/var/lib/limit-monitor/limit-monitor.sqlite \
+  SOURCE_ID=dev-machine \
+  ACCOUNT_ALIAS=local \
   bash -c 'cd /absolute/path/to/limit-monitor-checkout && npm run -s db-migrate -w hub'
 sudo -u <install-user> -- env \
   HOME=/home/<install-user> \
   PATH="/usr/local/bin:/usr/bin:/bin" \
   DB_FILE_PATH=/var/lib/limit-monitor/limit-monitor.sqlite \
-  bash -c 'cd /absolute/path/to/limit-monitor-checkout && npm run -s tokens -w hub -- issue --source-id <sourceId> --account-alias <accountAlias>'
+  SOURCE_ID=dev-machine \
+  ACCOUNT_ALIAS=local \
+  bash -c 'cd /absolute/path/to/limit-monitor-checkout && npm run -s tokens -w hub -- issue --source-id "$SOURCE_ID" --account-alias "$ACCOUNT_ALIAS"'
 ```
 
 `HOME` は install user 自身の home directory(`getent passwd <install-user>` の
@@ -286,33 +324,37 @@ sudo -u <install-user> -- env \
 `/var/lib/limit-monitor/limit-monitor.sqlite` = `deploy/hub.env.example` と
 systemd unit の `DB_FILE_PATH` と一致)を**絶対 path で**指定する。`tokens.ts`
 は起動時に自動 migrate しないため、初回は先に `db-migrate` を同じ DB path で
-実行する(上記の順: migration が先、issue が後)。`<sourceId>` は後で
+実行する(上記の順: migration が先、issue が後)。`SOURCE_ID` は後で
 `collector.env` の `SOURCE_ID` に一致させる値(既定例: `dev-machine`)。
 平文 token は表示された**1 回だけ**に限り有効で、Hub 側には hash のみ保存
 される。token 値はこのドキュメントに書かないこと。
 
 #### 0-4. root で collector-token を配置する(placeholder 禁止)
 
-0-3 の `tokens issue` 実行(install user)の stdout に平文 token が
-1 回だけ表示される。それを root が collector-token へ配置する:
+0-3 の `tokens issue` 実行(install user)で一度だけ表示される**tokenのvalue**を、標準入力からroot所有の`collector-token` fileへ配置する。`collector-token`には、このtokenのvalueそのものが入る。token値をチャット、Git、command line argumentsへ書かない:
 
 ```bash
 sudo install -d -m 0755 /etc/limit-monitor
-printf '%s' '<発行した平文 token>' | sudo tee /etc/limit-monitor/collector-token > /dev/null
-sudo chown root:root /etc/limit-monitor/collector-token
-sudo chmod 600 /etc/limit-monitor/collector-token
+sudo install -m 600 /dev/stdin /etc/limit-monitor/collector-token
 ```
 
-`validate_collector_token` は「symlink でない通常ファイル・root 所有・mode 600・
-trim 後非空」を要求し、既存 token は上書きしない(存在しない場合は die)。
-placeholder(空文字列・`CHANGE_ME` 等)のまま deploy すると非空検証で失敗する。
-token 値が shell history へ残るのを避けたい場合は、エディタで
-`/etc/limit-monitor/collector-token` を作成して上記の chown / chmod を行う。
+`sudo install -m 600 /dev/stdin ...`を実行した後、表示されたtokenのvalueを端末へ貼り付ける。入力が終わったら**`Ctrl-D`を押して標準入力を閉じる**。`Ctrl-D`はtokenのvalueには含めない。これは「入力終了（EOF）」を伝えるキー操作であり、`Ctrl-C`ではない。
+念のため権限をread-backする:
+
+```bash
+sudo chown root:root /etc/limit-monitor/collector-token
+sudo chmod 600 /etc/limit-monitor/collector-token
+sudo stat -c '%n owner=%U:%G mode=%a type=%F' /etc/limit-monitor/collector-token
+```
+
+期待値は`owner=root:root mode=600 type=regular file`。`validate_collector_token`は
+symlinkでない通常ファイル・root所有・mode 600・trim後非空を要求し、既存tokenは
+上書きしない。token配置前のdeployは`missing collector token`で停止する。
 
 #### 0-5. root で初回 deploy を実行する(SUDO_USER 必須)
 
 ```bash
-VITE_HUB_BASE_URL=http://limit-monitor.local:8787 sudo ./deploy.ts --hub-base-url <url> --server --collector
+sudo ./deploy.ts --hub-base-url <url> --server --collector
 ```
 
 **初回 root deploy は `sudo`(SUDO_USER 継承)が必須。** service 実行ユーザーは
@@ -324,7 +366,7 @@ build manifest が stale なら npm を実行せず fail-closed で die する(0
 
 ### 1. 初回 deploy と systemd 反映
 
-(上記 Phase 0 の 0-0 → 0-5 の順を実行する。clean host では 0-0 / 0-1 を先に行うこと。
+(上記 Phase 0 の 0-0 → 0-5 の順を実行する。0-1 の手動prepare-buildは任意。
 `--install-systemd` は `collector-token` と `/var/lib/limit-monitor` を current
 切替前に検証するため、0-2 / 0-4 を済ませていない clean host でいきなり
 `sudo ./deploy.ts --hub-base-url <url> --server --collector` を実行しても成立しない。)
@@ -334,7 +376,7 @@ build manifest が stale なら npm を実行せず fail-closed で die する(0
 - install user / group を解決する(`SUDO_USER` → 現在のユーザー → fail-closed。**Linux user は作らない**)
 - `/var/lib/limit-monitor` を初期化(server を含む選択時・未存在時のみ、解決した install user:group 所有・mode 0755 で作成。既存なら owner / mode を検証し、不一致は拒否。0755 = systemd StateDirectory の既定値)
 - deploy 時の実際の node path を `command -v node` で解決する
-- 選択した service の unit を `/etc/systemd/system/limit-{hub,dashboard,collector}.service` へ **render 済みで** 配置する:
+- 選択した service の unit を `/etc/systemd/system/limit-monitor-{hub,dashboard,collector}.service` へ **render 済みで** 配置する:
   unit template の `ExecStart=/usr/bin/node ...` を実 node path に、各 unit の
   `User=CHANGE_ME` / `Group=CHANGE_ME` を解決済み install user:group に置換する
 - render 済み unit の検証(placeholder 残留なし / node path の存在 / `${INSTALL_DIR}` 残留 / `systemd-analyze verify`)
@@ -386,14 +428,14 @@ Hub 側で確定するため collector 側の設定は不要。再発行(`issue`
 
 ### 3. Collector の実行
 
-`limit-collector.service` は real mode では `codex` / `claude` CLI を実行し、CLI 自身が
+`limit-monitor-collector.service` は real mode では `codex` / `claude` CLI を実行し、CLI 自身が
 自分の HOME 配下の login 情報を読む。collector は install user(= deploy を実行した
 通常ユーザー)として動くため、**そのアカウントで `codex` / `claude` に login 済み**で
 あること。`ProtectHome=false` のままにする。deploy 時にアカウントを指定する
 option / 環境変数は無く、`sudo` の `SUDO_USER` から自動で決まる:
 
 ```bash
-VITE_HUB_BASE_URL=... sudo ./deploy.ts --hub-base-url <url> --collector
+sudo ./deploy.ts --hub-base-url <url> --collector
 ```
 
 `--install-systemd` は install user を解決できない場合(root 直接で `SUDO_USER` が
@@ -428,7 +470,7 @@ install user の実行環境で実行可能であることを検証するため�
 bare command(`codex`)や `./codex` 等の相対 path、未解決のまま deploy すると
 失敗する(fail-closed)。無効 provider の CLI は対象外。
 
-unit 内の `SOURCE_ID` は token を発行した sourceId と一致させる。
+unit内の`SOURCE_ID`はtokenのsourceIdと一致させる必要はない。Hubは認証tokenに紐付くsourceIdを保存時の基準として使う。
 `COLLECTOR_INTERVAL_SECONDS=60` で常駐送信、`0` なら oneshot(1 回送信して終了)。
 oneshot は成功時 0 終了で終わるため、collector unit は `Restart=on-failure`
 (常駐でもクラッシュ時のみ再試行。`Restart=always` にすると oneshot の「1 回だけ」
@@ -436,8 +478,8 @@ oneshot は成功時 0 終了で終わるため、collector unit は `Restart=on
 
 ### 4. Dashboard の配信(Node.js service)
 
-Dashboard は `limit-dashboard.service` が `packages/client/dist/public` を直接配信する。
-nginx は不要。`HOST=127.0.0.1` / `PORT=3000` は `deploy/dashboard.env.example` と一致させておく。
+Dashboard は `limit-monitor-dashboard.service` が `packages/client/dist/public` を直接配信する。
+nginx は不要。`HOST=127.0.0.1` / `PORT=8788` は `deploy/dashboard.env.example` と一致させておく。
 ブラウザがアクセスする origin と bind address は分離している。LAN bind
 (`HOST=0.0.0.0` 等)にする場合は `dashboard.env` の `DASHBOARD_PUBLIC_ORIGIN` に
 ブラウザが実際に送る origin を設定し、`deploy/hub.env.example` の
@@ -445,7 +487,7 @@ nginx は不要。`HOST=127.0.0.1` / `PORT=3000` は `deploy/dashboard.env.examp
 はこの不整合を黙って作らず、LAN bind で `DASHBOARD_PUBLIC_ORIGIN` 未設定や
 CORS origin の不一致があれば止まる(fail-closed)。
 localhost 既定 bind (`HOST=127.0.0.1`) の場合は `DASHBOARD_PUBLIC_ORIGIN` が
-未設定でも deploy.sh が `http://127.0.0.1:3000` を導出するため設定不要。
+未設定でも deploy.sh が `http://127.0.0.1:8788` を導出するため設定不要。
 
 開発時は Vite 開発サーバーを使う:
 
@@ -495,15 +537,27 @@ Codex 側は応答のうち `limitId` / `usedPercent` / `windowDurationMins` / `
 
 ```bash
 git pull
-VITE_HUB_BASE_URL=http://limit-monitor.local:8787 sudo ./deploy.ts --hub-base-url <url> --server --collector
+sudo ./deploy.ts --hub-base-url <url> --server --collector  # 全サービス
 ```
 
-過去 release は `KEEP_RELEASES` 件まで残るため、切り戻しは symlink を戻して再起動する:
+既存の旧unit名(`limit-hub` / `limit-dashboard` / `limit-collector`)から移行する場合は、
+新unitを起動する前に旧unitを停止・disableする:
 
 ```bash
-sudo ln -sfn /var/www/limit-monitor/releases/<前の release> /var/www/limit-monitor/.current.new
+sudo systemctl disable --now limit-hub limit-dashboard limit-collector
+sudo systemctl daemon-reload
+```
+
+旧unitが存在しない場合のエラーは無視してよい。旧unitが停止済みであることを確認してから、
+上記の新名称のdeployを実行する。
+
+
+`package.json` の `version` を更新してから再度 `--prepare-build` と deploy を実行する。過去 version は `KEEP_VERSIONS` 件まで残るため、切り戻しは symlink を戻して再起動する:
+
+```bash
+sudo ln -sfn /var/www/limit-monitor/versions/<前の version> /var/www/limit-monitor/.current.new
 sudo mv -T /var/www/limit-monitor/.current.new /var/www/limit-monitor/current
-sudo systemctl restart limit-hub limit-collector
+sudo systemctl restart limit-monitor-hub limit-monitor-collector
 ```
 
 DB migration は前方向のみのため、schema 変更を含む release からの切り戻しは
@@ -522,8 +576,8 @@ sqlite3 /var/lib/limit-monitor/limit-monitor.sqlite ".backup /var/backups/limit-
 ## ログ
 
 ```bash
-journalctl -u limit-hub -f
-journalctl -u limit-collector -f
+journalctl -u limit-monitor-hub -f
+journalctl -u limit-monitor-collector -f
 ```
 
 - 構造化(JSON)ログ。access ログには requestId / method / path / status / duration が入る
@@ -537,11 +591,11 @@ journalctl -u limit-collector -f
 | --- | --- |
 | `readyz` が 503 | DB ファイルの権限、`StateDirectory` / `ReadWritePaths` の設定 |
 | ingest が 401 | token の失効状態(`tokens.ts list`)、Bearer header |
-| ingest が 403 | payload の `sourceId` と token の sourceId の一致 |
+| ingest が 403 | tokenが無効/失効、またはpayloadの`accountAlias`がtokenと不一致の場合。`sourceId`の不一致はHub側でtokenの値へ正規化される |
 | ingest が 400 | `observedAt` が Hub 時刻より 5 分以上未来でないか(clock skew) |
 | ingest が 429 | 送信間隔(rate limit: sourceId ごと 120 req/分) |
 | Dashboard が OFFLINE | Hub の稼働、build 時の `VITE_HUB_BASE_URL` |
-| Dashboard から fetch が CORS エラー | Hub の `CORS_ALLOWED_ORIGINS` に Dashboard の public origin(LAN bind は `DASHBOARD_PUBLIC_ORIGIN`、localhost 既定 bind は `http://127.0.0.1:3000`)が含まれているか |
+| Dashboard から fetch が CORS エラー | Hub の `CORS_ALLOWED_ORIGINS` に Dashboard の public origin(LAN bind は `DASHBOARD_PUBLIC_ORIGIN`、localhost 既定 bind は `http://127.0.0.1:8788`)が含まれているか |
 | collector が `spawn_failed` | `CODEX_BIN` / `CLAUDE_BIN` の絶対 path(deploy で install user の実行環境で検証済みのはず)、実行ユーザーの権限 |
 | collector が `exit_failure` | 実行ユーザーで `codex`/`claude` に login 済みか。`ProtectHome=false` になっているか |
 | collector が `app_server_error` | `codex login status`。`detail` に app-server のエラー文言が出る |

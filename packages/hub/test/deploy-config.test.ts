@@ -11,9 +11,9 @@ function readDeployFile(relativePath: string): string {
   return fs.readFileSync(path.join(REPO_ROOT, 'deploy', relativePath), 'utf8')
 }
 
-const HUB_UNIT = readDeployFile('systemd/limit-hub.service')
-const COLLECTOR_UNIT = readDeployFile('systemd/limit-collector.service')
-const DASHBOARD_UNIT = readDeployFile('systemd/limit-dashboard.service')
+const HUB_UNIT = readDeployFile('systemd/limit-monitor-hub.service')
+const COLLECTOR_UNIT = readDeployFile('systemd/limit-monitor-collector.service')
+const DASHBOARD_UNIT = readDeployFile('systemd/limit-monitor-dashboard.service')
 const HUB_ENV = readDeployFile('hub.env.example')
 const COLLECTOR_ENV = readDeployFile('collector.env.example')
 const DASHBOARD_ENV = readDeployFile('dashboard.env.example')
@@ -140,9 +140,9 @@ test('deploy script の --install-systemd は unit 配置と systemd 反映を�
   expect(DEPLOY_SH).toContain('install_if_missing_or_same')
   expect(DEPLOY_SH).toContain('cmp -s')
   expect(DEPLOY_SH).toContain('refusing to overwrite existing')
-  expect(DEPLOY_SH).toContain('limit-hub.service')
-  expect(DEPLOY_SH).toContain('limit-dashboard.service')
-  expect(DEPLOY_SH).toContain('limit-collector.service')
+  expect(DEPLOY_SH).toContain('limit-monitor-hub.service')
+  expect(DEPLOY_SH).toContain('limit-monitor-dashboard.service')
+  expect(DEPLOY_SH).toContain('limit-monitor-collector.service')
   expect(DEPLOY_SH).toContain('collector-token')
   expect(DEPLOY_SH).toContain('systemctl daemon-reload')
   // 管理対象 unit は marker / backup / atomic 更新で扱う(Major 2)
@@ -320,7 +320,7 @@ function runApplyUnitState(opts: {
       extractBashFn('trim_leading_space'),
       extractBashFn('read_env_value'),
       extractBashFn('trim_space'),
-      'COLLECTOR_SERVICE="limit-collector"',
+      'COLLECTOR_SERVICE="limit-monitor-collector"',
       `SYSTEMD_DIR="${systemdDir}"`,
       `LIMIT_MONITOR_ETC_DIR="${etcDir}"`,
       extractBashFn('apply_unit_state'),
@@ -351,7 +351,7 @@ test('apply_unit_state: collector oneshot(interval=0) は Result=success/ExecMai
   // interval=0 + start 成功 + 終了後 inactive + Result=success/ExecMainStatus=0
   // -> 0 終了(active read-back を行わず inactive は正常)
   const ok = runApplyUnitState({
-    unit: 'limit-collector.service',
+    unit: 'limit-monitor-collector.service',
     unitType: 'oneshot',
     envContent: 'COLLECTOR_INTERVAL_SECONDS=0\n',
     preState: 'inactive',
@@ -361,7 +361,7 @@ test('apply_unit_state: collector oneshot(interval=0) は Result=success/ExecMai
   expect(ok.code, ok.err).toBe(0)
   // restart 経路(起動時に active)も同様に Result/ExecMainStatus が根拠
   const restart = runApplyUnitState({
-    unit: 'limit-collector.service',
+    unit: 'limit-monitor-collector.service',
     unitType: 'oneshot',
     envContent: 'COLLECTOR_INTERVAL_SECONDS=0\n',
     preState: 'active',
@@ -400,7 +400,7 @@ test('collector unit template の既定は Type=simple で、render が interval
 test('apply_unit_state: collector oneshot の start 失敗は必ず fail-closed', () => {
   // oneshot でも start 自体の exit code 非 0 は die(inactive を正常扱いしない)
   const failed = runApplyUnitState({
-    unit: 'limit-collector.service',
+    unit: 'limit-monitor-collector.service',
     unitType: 'oneshot',
     envContent: 'COLLECTOR_INTERVAL_SECONDS=0\n',
     preState: 'inactive',
@@ -415,7 +415,7 @@ test('apply_unit_state: oneshot の CLI/auth/Hub 送信失敗は成功扱いし�
   // start は 0 終了(上記で確認済み)でも Result=success かつ ExecMainStatus=0
   // でない限り die する
   const badResult = runApplyUnitState({
-    unit: 'limit-collector.service',
+    unit: 'limit-monitor-collector.service',
     unitType: 'oneshot',
     envContent: 'COLLECTOR_INTERVAL_SECONDS=0\n',
     preState: 'inactive',
@@ -430,7 +430,7 @@ test('apply_unit_state: oneshot の CLI/auth/Hub 送信失敗は成功扱いし�
   expect(badResult.err).toContain('ExecMainStatus=1')
   // Result=success だが ExecMainStatus 非 0(例: signal による異常終了)も die
   const badStatus = runApplyUnitState({
-    unit: 'limit-collector.service',
+    unit: 'limit-monitor-collector.service',
     unitType: 'oneshot',
     envContent: 'COLLECTOR_INTERVAL_SECONDS=0\n',
     preState: 'inactive',
@@ -445,7 +445,7 @@ test('apply_unit_state: oneshot の CLI/auth/Hub 送信失敗は成功扱いし�
   // Type=oneshot では start 返却時点で結果は確定済みのはずなので、
   // 空のままなら異常として fail-closed する。
   const undetermined = runApplyUnitState({
-    unit: 'limit-collector.service',
+    unit: 'limit-monitor-collector.service',
     unitType: 'oneshot',
     envContent: 'COLLECTOR_INTERVAL_SECONDS=0\n',
     preState: 'inactive',
@@ -461,7 +461,7 @@ test('apply_unit_state: oneshot の CLI/auth/Hub 送信失敗は成功扱いし�
 test('apply_unit_state: interval が 0 以外 / 未設定の collector は active read-back を維持', () => {
   // interval=60(常駐)で終了後 inactive -> read-back で die
   const resident = runApplyUnitState({
-    unit: 'limit-collector.service',
+    unit: 'limit-monitor-collector.service',
     envContent: 'COLLECTOR_INTERVAL_SECONDS=60\n',
     preState: 'inactive',
     startExit: 0,
@@ -471,7 +471,7 @@ test('apply_unit_state: interval が 0 以外 / 未設定の collector は activ
   expect(resident.err).toContain('read-back failed')
   // COLLECTOR_INTERVAL_SECONDS 未設定も従来どおり(常駐扱い)
   const unset = runApplyUnitState({
-    unit: 'limit-collector.service',
+    unit: 'limit-monitor-collector.service',
     envContent: 'SOURCE_ID=dev\n',
     preState: 'inactive',
     startExit: 0,
@@ -481,7 +481,7 @@ test('apply_unit_state: interval が 0 以外 / 未設定の collector は activ
   expect(unset.err).toContain('read-back failed')
   // 常駐 collector は終了後 active なら従来どおり正常
   const active = runApplyUnitState({
-    unit: 'limit-collector.service',
+    unit: 'limit-monitor-collector.service',
     envContent: 'COLLECTOR_INTERVAL_SECONDS=60\n',
     preState: 'inactive',
     startExit: 0,
@@ -493,7 +493,7 @@ test('apply_unit_state: interval が 0 以外 / 未設定の collector は activ
 test('apply_unit_state: oneshot 判定は collector 専用で hub/dashboard は active 必須を維持', () => {
   // collector.env が interval=0 でも hub unit は oneshot 扱いはされない
   const hub = runApplyUnitState({
-    unit: 'limit-hub.service',
+    unit: 'limit-monitor-hub.service',
     envContent: 'COLLECTOR_INTERVAL_SECONDS=0\n',
     preState: 'inactive',
     startExit: 0,
@@ -503,7 +503,7 @@ test('apply_unit_state: oneshot 判定は collector 専用で hub/dashboard は 
   expect(hub.err).toContain('read-back failed')
   // hub が active なら従来どおり正常
   const hubActive = runApplyUnitState({
-    unit: 'limit-hub.service',
+    unit: 'limit-monitor-hub.service',
     envContent: 'COLLECTOR_INTERVAL_SECONDS=0\n',
     preState: 'inactive',
     startExit: 0,
@@ -536,10 +536,10 @@ function runCollectorTypeRender(opts: {
   /** collector unit template の Type= 行を除去(read-back fail-closed を検証) */
   dropTypeLine?: boolean
 }): { code: number; err: string; out: string; resolvedType?: string; rendered: string } {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'limit-collector-type-'))
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'limit-monitor-collector-type-'))
   const etcDir = path.join(dir, 'etc')
   const renderedEnvDir = path.join(dir, 'rendered-env')
-  const out = path.join(dir, 'limit-collector.service.rendered')
+  const out = path.join(dir, 'limit-monitor-collector.service.rendered')
   try {
     fs.mkdirSync(etcDir)
     fs.mkdirSync(renderedEnvDir)
@@ -549,10 +549,10 @@ function runCollectorTypeRender(opts: {
     if (opts.hubEnv !== undefined) {
       fs.writeFileSync(path.join(etcDir, 'hub.env'), opts.hubEnv)
     }
-    let templatePath = path.join(REPO_ROOT, 'deploy/systemd/limit-collector.service')
+    let templatePath = path.join(REPO_ROOT, 'deploy/systemd/limit-monitor-collector.service')
     if (opts.dropTypeLine) {
       const lines = fs.readFileSync(templatePath, 'utf8').split('\n')
-      templatePath = path.join(dir, 'limit-collector.service')
+      templatePath = path.join(dir, 'limit-monitor-collector.service')
       fs.writeFileSync(templatePath, lines.filter((l: string) => l !== 'Type=simple').join('\n'))
     }
     const harness = [
@@ -631,7 +631,9 @@ test('render: Type 行欠落の stub template かつ interval=0 の場合は rea
     collectorEnv: 'COLLECTOR_INTERVAL_SECONDS=0\n'
   })
   expect(r.code).not.toBe(0)
-  expect(r.err).toContain('rendered limit-collector.service Type is <missing>, expected oneshot')
+  expect(r.err).toContain(
+    'rendered limit-monitor-collector.service Type is <missing>, expected oneshot'
+  )
   expect(r.out).not.toContain('RENDER_OK')
 })
 
@@ -671,7 +673,9 @@ test('render: render 済み unit に Type 行が無い(mismatch)場合は fail-c
     collectorEnv: 'COLLECTOR_INTERVAL_SECONDS=60\n'
   })
   expect(r.code).not.toBe(0)
-  expect(r.err).toContain('rendered limit-collector.service Type is <missing>, expected simple')
+  expect(r.err).toContain(
+    'rendered limit-monitor-collector.service Type is <missing>, expected simple'
+  )
 })
 
 // ---- wait_for_hub_ready: /readyz の有限 timeout polling ----
@@ -689,7 +693,7 @@ function runWaitForHubReady(opts: {
   /** LIMIT_MONITOR_HUB_READY_TIMEOUT_SECONDS への上書き(既定 30 秒) */
   timeoutSeconds?: string
 }): { code: number; err: string; out: string; curlCalls: string[] } {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'limit-hub-ready-'))
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'limit-monitor-hub-ready-'))
   try {
     const etcDir = path.join(dir, 'etc')
     fs.mkdirSync(etcDir)
@@ -728,7 +732,7 @@ function runWaitForHubReady(opts: {
       extractBashFn('trim_space'),
       extractBashFn('read_env_value'),
       extractBashFn('wait_for_hub_ready'),
-      'HUB_SERVICE="limit-hub"',
+      'HUB_SERVICE="limit-monitor-hub"',
       `LIMIT_MONITOR_ETC_DIR="${etcDir}"`,
       'wait_for_hub_ready',
       'echo "HUB_READY_OK"'
@@ -913,7 +917,7 @@ test('Dashboard は Node.js service として配信し nginx に依存しない'
 
 test('Dashboard unit は port と bind address を設定で切り替えられる', () => {
   // 他サービスと同居させるため port は環境変数で変えられる
-  expect(DASHBOARD_UNIT).toContain('Environment=PORT=3000')
+  expect(DASHBOARD_UNIT).toContain('Environment=PORT=8788')
   expect(DASHBOARD_ENV).toMatch(/^PORT=\d+$/m)
   // 既定は localhost bind。LAN へ出すのは明示設定したときだけ
   expect(DASHBOARD_UNIT).toContain('Environment=HOST=127.0.0.1')
@@ -1012,14 +1016,16 @@ function runValidateCors(opts: { hubCors: string; dashboardEnv?: string }): {
     fs.writeFileSync(path.join(dir, 'hub.env'), `CORS_ALLOWED_ORIGINS=${opts.hubCors}\n`)
     fs.writeFileSync(
       path.join(dir, 'dashboard.env'),
-      opts.dashboardEnv ?? 'HOST=127.0.0.1\nPORT=3000\n'
+      opts.dashboardEnv ?? 'HOST=127.0.0.1\nPORT=8788\n'
     )
     const harness = [
       'set -euo pipefail',
       extractBashFn('trim_leading_space'),
+      extractBashFn('trim_space'),
       extractBashFn('read_env_value'),
       extractBashFn('die'),
       extractBashFn('is_strict_origin'),
+      extractBashFn('dashboard_origin_from_env'),
       extractBashFn('validate_dashboard_cors'),
       'LIMIT_MONITOR_ETC_DIR="__DIR__"',
       'validate_dashboard_cors',
@@ -1042,36 +1048,90 @@ function runValidateCors(opts: { hubCors: string; dashboardEnv?: string }): {
   }
 }
 
+test('validate_dashboard_cors: localhost で PORT 未設定なら Dashboard 既定 port 8788 を導出する', () => {
+  const derived = runValidateCors({
+    hubCors: 'http://127.0.0.1:8788',
+    dashboardEnv: 'HOST=127.0.0.1\n'
+  })
+  expect(derived.code, derived.err).toBe(0)
+})
 test('validate_dashboard_cors: CORS_ALLOWED_ORIGINS の各 origin は trim してから比較する', () => {
-  // " http://127.0.0.1:3000 " の前後空白を trim して localhost 既定 origin と一致させる
-  const allowed = runValidateCors({ hubCors: ' http://127.0.0.1:3000 ' })
+  // " http://127.0.0.1:8788 " の前後空白を trim して localhost 既定 origin と一致させる
+  const allowed = runValidateCors({ hubCors: ' http://127.0.0.1:8788 ' })
   expect(allowed.code).toBe(0)
   // 空白なし(従来動作)は引き続き一致する
-  const noSpace = runValidateCors({ hubCors: 'http://127.0.0.1:3000' })
+  const noSpace = runValidateCors({ hubCors: 'http://127.0.0.1:8788' })
   expect(noSpace.code).toBe(0)
 })
 
 test('validate_dashboard_cors: 複数の origin のうち trim 後の一致分を許可する', () => {
-  // 3 件目の " http://127.0.0.1:3000 " だけが trim 後に一致する
+  // 3 件目の " http://127.0.0.1:8788 " だけが trim 後に一致する
   const multi = runValidateCors({
-    hubCors: 'https://a.example, http://127.0.0.1:3000 , https://b.example'
+    hubCors: 'https://a.example, http://127.0.0.1:8788 , https://b.example'
   })
   expect(multi.code).toBe(0)
 })
 
 test('validate_dashboard_cors: trim しても一致しない origin は fail-closed', () => {
-  // 一致 origin がない(127.0.0.1:3000 ではない)→ die して非ゼロ終了
+  // 一致 origin がない(127.0.0.1:8788 ではない)→ die して非ゼロ終了
   const denied = runValidateCors({ hubCors: ' https://a.example , https://b.example ' })
   expect(denied.code).not.toBe(0)
-  expect(denied.err).toContain('must allow dashboard origin http://127.0.0.1:3000')
+  expect(denied.err).toContain('must allow dashboard origin http://127.0.0.1:8788')
 })
 
 test('validate_dashboard_cors: 空要素(カンマの空白)は trim + filter でスキップする', () => {
   // 先頭/末尾の余分なカンマで生じる空 origin はスキップし、実体は一致する
   const withEmpty = runValidateCors({
-    hubCors: ' , http://127.0.0.1:3000 , '
+    hubCors: ' , http://127.0.0.1:8788 , '
   })
   expect(withEmpty.code).toBe(0)
+})
+
+function runSyncHubCorsOrigin(opts: { hubCors: string; dashboardOrigin: string }): {
+  code: number
+  content: string
+  err: string
+} {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'limit-cors-sync-test-'))
+  const source = path.join(dir, 'hub.env')
+  const dest = path.join(dir, 'hub-effective.env')
+  try {
+    fs.writeFileSync(source, `APP_ENV=production\nCORS_ALLOWED_ORIGINS=${opts.hubCors}\nDB_FILE_PATH=/safe/path\n`)
+    const harness = [
+      'set -euo pipefail',
+      extractBashFn('trim_space'),
+      extractBashFn('die'),
+      extractBashFn('sync_hub_cors_origin'),
+      `sync_hub_cors_origin "${source}" "${dest}" "${opts.dashboardOrigin}"`
+    ].join('\n')
+    const script = path.join(dir, 'harness.sh')
+    fs.writeFileSync(script, harness)
+    try {
+      execFileSync('bash', [script], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+      return { code: 0, content: fs.readFileSync(dest, 'utf8'), err: '' }
+    } catch (e) {
+      return {
+        code: (e as { code?: number }).code ?? 1,
+        content: fs.existsSync(dest) ? fs.readFileSync(dest, 'utf8') : '',
+        err: (e as { stderr?: string }).stderr ?? ''
+      }
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+test('sync_hub_cors_origin: Dashboard originだけを追加し、既存設定を保持する', () => {
+  const result = runSyncHubCorsOrigin({
+    hubCors: 'http://127.0.0.1:8788',
+    dashboardOrigin: 'http://192.168.11.53:8788'
+  })
+  expect(result.code, result.err).toBe(0)
+  expect(result.content).toContain('APP_ENV=production\n')
+  expect(result.content).toContain(
+    'CORS_ALLOWED_ORIGINS=http://127.0.0.1:8788,http://192.168.11.53:8788\n'
+  )
+  expect(result.content).toContain('DB_FILE_PATH=/safe/path\n')
 })
 
 // ---- unit render (B1/B2) の実挙動を bash で検証する ----
@@ -1094,7 +1154,11 @@ function runUnitRender(opts: {
   try {
     const unitsDir = path.join(dir, 'units')
     fs.mkdirSync(unitsDir)
-    for (const name of ['limit-hub', 'limit-collector', 'limit-dashboard']) {
+    for (const name of [
+      'limit-monitor-hub',
+      'limit-monitor-collector',
+      'limit-monitor-dashboard'
+    ]) {
       const src = fs.readFileSync(
         path.join(REPO_ROOT, 'deploy', 'systemd', `${name}.service`),
         'utf8'
@@ -1112,11 +1176,11 @@ function runUnitRender(opts: {
       `FORCE_PLACEHOLDER="${opts.forcePlaceholder ? 1 : 0}"`,
       `RENDERED_SYSTEMD_DIR="${unitsDir}"`,
       `node_bin="${opts.nodeBin ?? process.execPath}"`,
-      'for tpl in limit-hub limit-collector limit-dashboard; do',
+      'for tpl in limit-monitor-hub limit-monitor-collector limit-monitor-dashboard; do',
       `  render_unit_from_template "${dir}/\${tpl}.service.tpl" "\$node_bin" "${unitsDir}/\${tpl}.service"`,
       'done',
       'if [[ "${FORCE_PLACEHOLDER}" == "1" ]]; then',
-      `  sed -i 's|^User=.*|User=CHANGE_ME|' "${unitsDir}/limit-collector.service"`,
+      `  sed -i 's|^User=.*|User=CHANGE_ME|' "${unitsDir}/limit-monitor-collector.service"`,
       'fi',
       'validate_rendered_units',
       'echo "RENDER_OK"'
@@ -1222,7 +1286,7 @@ test('M4: DASHBOARD_PUBLIC_ORIGIN として不正な URL は fail-closed (deploy
   ]) {
     const res = runValidateCors({
       hubCors: 'http://192.168.1.10:3000',
-      dashboardEnv: `HOST=127.0.0.1\nPORT=3000\nDASHBOARD_PUBLIC_ORIGIN=${bad}\n`
+      dashboardEnv: `HOST=127.0.0.1\nPORT=8788\nDASHBOARD_PUBLIC_ORIGIN=${bad}\n`
     })
     expect(res.code, `should die for origin ${bad}: ${res.err}`).not.toBe(0)
     expect(res.err).toContain('DASHBOARD_PUBLIC_ORIGIN must be an origin')
@@ -1231,7 +1295,7 @@ test('M4: DASHBOARD_PUBLIC_ORIGIN として不正な URL は fail-closed (deploy
   // 不一致になるため拒否)は受理
   const good = runValidateCors({
     hubCors: 'http://192.168.1.10:3000',
-    dashboardEnv: 'HOST=127.0.0.1\nPORT=3000\nDASHBOARD_PUBLIC_ORIGIN=http://192.168.1.10:3000\n'
+    dashboardEnv: 'HOST=127.0.0.1\nPORT=8788\nDASHBOARD_PUBLIC_ORIGIN=http://192.168.1.10:3000\n'
   })
   expect(good.code, 'should accept strict origin: ' + good.err).toBe(0)
 })
@@ -1629,7 +1693,7 @@ test('install-systemd: 全読み取り専用検証が完了してから配置(un
   const placementOps = [
     'ensure_systemd_state\n',
     'install_managed_unit "${RENDERED_SYSTEMD_DIR}/${template}" "${SYSTEMD_DIR}/${template}"',
-    'ensure_env_install_dir "${REPO_ROOT}/deploy/hub.env.example" "${LIMIT_MONITOR_ETC_DIR}/hub.env" 0644'
+    'install -m "${hub_env_mode}" "${HUB_ENV_FOR_DEPLOY}" "${LIMIT_MONITOR_ETC_DIR}/hub.env'
   ]
   for (const marker of prePlacementValidators) {
     const idx = DEPLOY_SH.indexOf(marker)
@@ -1651,8 +1715,8 @@ test('install-systemd: 全読み取り専用検証が完了してから配置(un
 
 test('Minor 6: collector unit は Hub へ送信するため Hub が先に立ち上がる', () => {
   // 再起動時 Hub 先行を保証。Wants= を使うことで Hub 不在でも単体起動可能
-  expect(directivesOf(COLLECTOR_UNIT)).toMatch(/After=.*limit-hub\.service/)
-  expect(directivesOf(COLLECTOR_UNIT)).toMatch(/Wants=.*limit-hub\.service/)
+  expect(directivesOf(COLLECTOR_UNIT)).toMatch(/After=.*limit-monitor-hub\.service/)
+  expect(directivesOf(COLLECTOR_UNIT)).toMatch(/Wants=.*limit-monitor-hub\.service/)
 })
 
 // ---- env parser: duplicate key 検出の回帰テスト ----
@@ -1719,7 +1783,7 @@ function runCollectorEnvPlacement(opts: { example: string; rendered: string }): 
   err: string
   placed: string
 } {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'limit-collector-env-place-'))
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'limit-monitor-collector-env-place-'))
   let placed = ''
   try {
     const examplePath = path.join(dir, 'collector.env.example')
@@ -1878,10 +1942,10 @@ function runInstallManagedUnit(opts: { src: string; existing?: string; expectBac
   let destContent = ''
   let backupContents: string[] = []
   try {
-    const srcPath = path.join(dir, 'limit-hub.service')
+    const srcPath = path.join(dir, 'limit-monitor-hub.service')
     const destParent = path.join(dir, 'systemd')
     fs.mkdirSync(destParent)
-    const dest = path.join(destParent, 'limit-hub.service')
+    const dest = path.join(destParent, 'limit-monitor-hub.service')
     fs.writeFileSync(srcPath, opts.src)
     if (opts.existing !== undefined) {
       fs.writeFileSync(dest, opts.existing)
@@ -1903,7 +1967,7 @@ function runInstallManagedUnit(opts: { src: string; existing?: string; expectBac
     }
     if (opts.expectBackup) {
       for (const name of fs.readdirSync(destParent)) {
-        if (name.startsWith('limit-hub.service.bak-')) {
+        if (name.startsWith('limit-monitor-hub.service.bak-')) {
           backupContents.push(fs.readFileSync(path.join(destParent, name), 'utf8'))
         }
       }
@@ -2225,7 +2289,7 @@ function runRootBuildPhase(opts: {
       // write_build_manifest が manifest 出力先として参照する
       // (deploy.sh と同一の値: ${REPO_ROOT}/dist/.limit-monitor-build-manifest)
       `BUILD_MANIFEST_FILE="${repo}/dist/.limit-monitor-build-manifest"`,
-      'VITE_HUB_BASE_URL=http://127.0.0.1:3000',
+      'VITE_HUB_BASE_URL=http://127.0.0.1:8787',
       extractBashFn('sha256_of_file'),
       extractBashFn('compute_tracked_source_digest'),
       extractBashFn('compute_tree_digest'),
@@ -2335,7 +2399,7 @@ function runRootBuildPhase(opts: {
     // 「存在する絶対 path home」チェックを通過させる)
     `getent(){ printf '${opts.sudoUser ?? 'alice'}:x:1000:1000:x:${repo}:/bin/sh\\n'; }`,
     `SKIP_NPM_CI=${opts.skipNpmCi === false ? 0 : 1}`,
-    'VITE_HUB_BASE_URL=http://127.0.0.1:3000',
+    'VITE_HUB_BASE_URL=http://127.0.0.1:8787',
     buildSection,
     'echo "BUILD_PHASE_DONE"'
   ].join('\n')
@@ -2646,13 +2710,28 @@ test('Hub token CLI: staging は bin/ を stage し、staged tree で tokens.ts 
   expect(stagingVerify).toContain('./packages/hub/dist/src/app.js')
 })
 
+test('version directory: 既存 version は --force なしで拒否し、指定時だけ置換する', () => {
+  const versionSection = DEPLOY_SH.split('VERSIONS_DIR="${INSTALL_DIR}/versions"')[1]
+  if (versionSection === undefined) throw new Error('version directory section not found')
+  const beforeLogs = versionSection.split('# --- release ---')[0]
+  expect(beforeLogs).toContain(
+    'version already exists: ${VERSION_DIR} (use --force to replace it explicitly)'
+  )
+  expect(beforeLogs).toContain('FORCE_VERSION')
+  expect(DEPLOY_SH).toContain('--force) FORCE_VERSION=1')
+  expect(DEPLOY_SH).toContain('VERSION_BACKUP_DIR="${VERSIONS_DIR}/.${VERSION_ID}.backup.$$"')
+  expect(DEPLOY_SH).toContain('mv -T -- "${VERSION_DIR}" "${VERSION_BACKUP_DIR}"')
+  expect(DEPLOY_SH).toContain('restore_version_backup')
+  expect(DEPLOY_SH).toContain('FORCE_VERSION="${FORCE_VERSION:-0}"')
+})
+
 // ---- release dir mode 回帰 ---------------------------------------------------
-// mktemp -d の STAGE_DIR は 0700。`cp -a "${STAGE_DIR}/." "${RELEASE_DIR}/"` は
-// 既存の RELEASE_DIR へその 0700 mode を伝播させ、service user が current
+// mktemp -d の STAGE_DIR は 0700。`cp -a "${STAGE_DIR}/." "${VERSION_DIR}/"` は
+// 既存の VERSION_DIR へその 0700 mode を伝播させ、service user が current
 // release を traverse できなくなる(Major)。release section は cp -a の属性
-// 伝播に頼らず RELEASE_DIR を明示 0755 に確定させる(再帰 chmod なし:
+// 伝播に頼らず VERSION_DIR を明示 0755 に確定させる(再帰 chmod なし:
 // release 内部の file/dirs は staging 側で既定の安全 mode で生成済み)。
-test('release section: RELEASE_DIR の mode は 0755 で確定する(cp -a 伝播なし / 再帰 chmod なし)', () => {
+test('release section: VERSION_DIR の mode は 0755 で確定する(cp -a 伝播なし / 再帰 chmod なし)', () => {
   const releaseSection = (() => {
     const rest = DEPLOY_SH.split('# --- release ---')[1]
     if (rest === undefined) throw new Error('release section not found')
@@ -2660,15 +2739,15 @@ test('release section: RELEASE_DIR の mode は 0755 で確定する(cp -a 伝�
     if (head === undefined) throw new Error('systemd section not found')
     return head
   })()
-  // 親 releases/ と release dir の作成時に mode を明示する
-  expect(releaseSection).toContain('install -d -m 0755 "${RELEASES_DIR}"')
-  expect(releaseSection).toContain('install -d -m 0755 "${RELEASE_DIR}"')
-  // cp -a の属性伝播(0700)を打ち消すため、copy 後に RELEASE_DIR を 0755 に確定
-  const copyIndex = releaseSection.indexOf('cp -a "${STAGE_DIR}/." "${RELEASE_DIR}/"')
+  // 親 versions/ と version dir の作成時に mode を明示する
+  expect(releaseSection).toContain('install -d -m 0755 "${VERSIONS_DIR}"')
+  expect(releaseSection).toContain('install -d -m 0755 "${VERSION_DIR}"')
+  // cp -a の属性伝播(0700)を打ち消すため、copy 後に VERSION_DIR を 0755 に確定
+  const copyIndex = releaseSection.indexOf('cp -a "${STAGE_DIR}/." "${VERSION_DIR}/"')
   if (copyIndex === -1) throw new Error('release copy not found')
-  expect(releaseSection.slice(copyIndex)).toContain('chmod 0755 "${RELEASE_DIR}"')
+  expect(releaseSection.slice(copyIndex)).toContain('chmod 0755 "${VERSION_DIR}"')
   // release 内部へ過度に広がらない: 再帰的な chmod は行わない
   expect(releaseSection).not.toMatch(/chmod\s+-R/)
-  // owner は chown で変えない(既存の releases/current 設計: deploy 実行ユーザー)
+  // owner は chown で変えない(既存の versions/current 設計: deploy 実行ユーザー)
   expect(releaseSection).not.toContain('chown')
 })

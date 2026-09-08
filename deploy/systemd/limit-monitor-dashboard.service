@@ -1,5 +1,5 @@
 # Limit Monitor Dashboard systemd unit template
-# 配置例: /etc/systemd/system/limit-dashboard.service
+# 配置例: /etc/systemd/system/limit-monitor-dashboard.service
 #
 # Dashboard は Node.js 常駐サービスとして static build を配信する
 # (nginx などの Web サーバーは使わない)。Hub とは別 service なので、
@@ -32,7 +32,7 @@ Environment=INSTALL_DIR=/var/www/limit-monitor
 # (LAN bind では dashboard.env の DASHBOARD_PUBLIC_ORIGIN も必須になる)
 Environment=HOST=127.0.0.1
 # 他サービスと同居させるため port は必ず設定で変えられる
-Environment=PORT=3000
+Environment=PORT=8788
 # `-` 付きでファイルが無くても起動できるようにする(既定値で動く)
 EnvironmentFile=-/etc/limit-monitor/dashboard.env
 

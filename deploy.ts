@@ -12,7 +12,7 @@
  *
  * service 実行ユーザーは deploy を実行した通常ユーザーに統一する。専用の
  * Linux user は作らないし前提にもしない。実行ユーザーの指定を利用者へ求めず、
- * deploy.sh が自動解決する: `sudo -E` 経由なら SUDO_USER、非 root 実行なら
+ * deploy.sh が自動解決する: `sudo` 経由なら SUDO_USER、非 root 実行なら
  * 現在のユーザー、root 直接で主体が不明なら fail-closed で停止する。
  *
  * 秘密値は引数で渡さない。token は /etc/limit-monitor/collector-token
@@ -30,6 +30,7 @@ export type ServiceTarget = 'server' | 'collector'
 export type ParsedArgs = {
   help: boolean
   dryRun: boolean
+  force: boolean
   /** 選択順ではなく server -> collector の canonical 順 */
   services: ServiceTarget[]
   hubBaseUrl: string | undefined
@@ -45,9 +46,10 @@ export const USAGE = `limit-monitor deploy
   sudo ./deploy.ts --server --collector --hub-base-url <url>  全サービスを deploy する
 
 引数:
-  --server           limit-hub.service と limit-dashboard.service を対象にする
-  --collector        limit-collector.service を対象にする
+  --server           limit-monitor-hub.service と limit-monitor-dashboard.service を対象にする
+  --collector        limit-monitor-collector.service を対象にする
   --hub-base-url     Dashboard に埋め込む Hub の URL(sudoの環境保持に依存しない)
+  --force            同じ package.json version の既存 version directory を置き換える
   --dry-run          委譲先コマンドを表示するだけで実行しない
   -h, --help         このヘルプを表示する
 
@@ -62,7 +64,7 @@ SUDO_USER から自動解決し、root 直接で主体が不明なら停止す�
 環境変数(deploy/deploy.sh へそのまま渡る。値はここでは出力しない):
   VITE_HUB_BASE_URL  Dashboardのbuildに焼き込むHub URL(または--hub-base-url)
   INSTALL_DIR        release 配置先(既定 /var/www/limit-monitor)
-  KEEP_RELEASES      残す過去 release 数(既定 5)
+  KEEP_VERSIONS      残す過去 version 数(既定 5)
 
 より細かい option は deploy/deploy.sh --help を参照する。`
 
@@ -73,6 +75,7 @@ SUDO_USER から自動解決し、root 直接で主体が不明なら停止す�
 export function parseArgs(argv: readonly string[]): ParseResult {
   let help = false
   let dryRun = false
+  let force = false
   let server = false
   let collector = false
   let hubBaseUrl: string | undefined
@@ -86,6 +89,12 @@ export function parseArgs(argv: readonly string[]): ParseResult {
         break
       case '--dry-run':
         dryRun = true
+        break
+      case '--force':
+        if (force) {
+          return { ok: false, message: '--force is specified more than once' }
+        }
+        force = true
         break
       case '--server':
         if (server) {
@@ -120,7 +129,7 @@ export function parseArgs(argv: readonly string[]): ParseResult {
   }
 
   if (help) {
-    return { ok: true, value: { help: true, dryRun, services: [], hubBaseUrl } }
+    return { ok: true, value: { help: true, dryRun, force, services: [], hubBaseUrl } }
   }
 
   const services: ServiceTarget[] = []
@@ -137,7 +146,7 @@ export function parseArgs(argv: readonly string[]): ParseResult {
     }
   }
 
-  return { ok: true, value: { help: false, dryRun, services, hubBaseUrl } }
+  return { ok: true, value: { help: false, dryRun, force, services, hubBaseUrl } }
 }
 
 /**
@@ -147,6 +156,9 @@ export function parseArgs(argv: readonly string[]): ParseResult {
  */
 export function buildDeployShArgs(parsed: ParsedArgs): string[] {
   const args = ['--install-systemd', '--services', parsed.services.join(',')]
+  if (parsed.force) {
+    args.push('--force')
+  }
   if (parsed.hubBaseUrl !== undefined) {
     args.push('--hub-base-url', parsed.hubBaseUrl)
   }

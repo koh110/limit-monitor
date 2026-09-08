@@ -25,15 +25,9 @@ export async function ingestObservation({
   tokenAccountAlias: string
   now: Date
 }): Promise<IngestResult> {
-  // token は対応する sourceId だけを書き込める(仕様 7.2、mismatch は 403)
-  if (observation.sourceId !== tokenSourceId) {
-    throw createHttpException<IngestResponse['403']['content']['application/problem+json']>(403, {
-      type: 'about:blank',
-      title: 'Forbidden',
-      status: 403,
-      detail: `token is not allowed to write for sourceId "${observation.sourceId}"`
-    })
-  }
+  // sourceIdの基準は認証token。payloadのsourceIdは信用せず、tokenに
+  // 紐付くsourceIdへ正規化する(collector側の設定名の不一致で403にしない)。
+  const sourceId = tokenSourceId
 
   // accountAlias は認証 token 側が正。payload での明示は任意だが、
   // token と異なる accountAlias への書き込みは許可しない(403)
@@ -131,7 +125,7 @@ export async function ingestObservation({
       resetsAt: bucket.resetsAt ?? null,
       observedAt: observation.observedAt,
       receivedAt,
-      sourceId: observation.sourceId,
+      sourceId,
       reached: bucket.reached ?? false
     })
   }

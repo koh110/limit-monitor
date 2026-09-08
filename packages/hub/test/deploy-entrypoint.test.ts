@@ -47,6 +47,26 @@ test('deploy.ts: --hub-base-url はsudoの環境保持に依存せず委譲す�
   )
 })
 
+test('deploy.ts: --force は同じ version の再配置指定として委譲する', () => {
+  const res = runDeployTs([
+    '--server',
+    '--force',
+    '--hub-base-url',
+    'http://127.0.0.1:8787',
+    '--dry-run'
+  ])
+  expect(res.code, res.err).toBe(0)
+  expect(res.out.trim()).toBe(
+    `bash ${DEPLOY_SH_PATH} --install-systemd --services server --force --hub-base-url http://127.0.0.1:8787`
+  )
+})
+
+test('deploy.ts: --force の重複指定は拒否する', () => {
+  const res = runDeployTs(['--server', '--force', '--force', '--dry-run'], HUB_URL_ENV)
+  expect(res.code).not.toBe(0)
+  expect(res.err).toContain('--force is specified more than once')
+})
+
 test('deploy.ts: --server --collector は選択順によらず canonical 順で渡す', () => {
   const forward = runDeployTs(['--server', '--collector', '--dry-run'], HUB_URL_ENV)
   const reversed = runDeployTs(['--collector', '--server', '--dry-run'], HUB_URL_ENV)
@@ -125,6 +145,7 @@ test('deploy.ts: --help は service 未選択でも usage を出して成功す�
     expect(res.out).toContain('limit-monitor deploy')
     expect(res.out).toContain('--server')
     expect(res.out).toContain('--collector')
+    expect(res.out).toContain('--force')
     expect(res.out).toContain('--dry-run')
   }
 })
@@ -396,17 +417,17 @@ function runSelectServices(services: string): { code: number; out: string; err: 
 test('services: server は hub + dashboard、collector は collector unit を選ぶ', () => {
   const server = runSelectServices('server')
   expect(server.code, server.err).toBe(0)
-  expect(server.out).toContain('UNITS=limit-hub.service limit-dashboard.service ')
+  expect(server.out).toContain('UNITS=limit-monitor-hub.service limit-monitor-dashboard.service ')
 
   const collector = runSelectServices('collector')
   expect(collector.code, collector.err).toBe(0)
-  expect(collector.out).toContain('UNITS=limit-collector.service ')
+  expect(collector.out).toContain('UNITS=limit-monitor-collector.service ')
 
   const both = runSelectServices('collector,server')
   expect(both.code, both.err).toBe(0)
   // 選択順によらず hub -> dashboard -> collector の順で反映する
   expect(both.out).toContain(
-    'UNITS=limit-hub.service limit-dashboard.service limit-collector.service '
+    'UNITS=limit-monitor-hub.service limit-monitor-dashboard.service limit-monitor-collector.service '
   )
 })
 
@@ -414,7 +435,7 @@ test('services: 前後空白は trim して受理する', () => {
   const res = runSelectServices(' server , collector ')
   expect(res.code, res.err).toBe(0)
   expect(res.out).toContain(
-    'UNITS=limit-hub.service limit-dashboard.service limit-collector.service '
+    'UNITS=limit-monitor-hub.service limit-monitor-dashboard.service limit-monitor-collector.service '
   )
 })
 

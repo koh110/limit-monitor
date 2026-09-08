@@ -125,7 +125,7 @@ test('失効した token は 401', async () => {
   cleanup()
 })
 
-test('token の sourceId と異なる sourceId への書き込みは 403', async () => {
+test('payload の sourceId は token の sourceId に正規化される', async () => {
   const { db, cleanup } = createTestDb()
   const app = createApp({ db })
   const issued = await issueToken({ db, sourceId: 'dev-machine', accountAlias: 'default', now })
@@ -134,7 +134,9 @@ test('token の sourceId と異なる sourceId への書き込みは 403', async
     token: issued.token,
     payload: createPayload({ sourceId: 'other-machine' })
   })
-  expect(res.status).toBe(403)
+  expect(res.status).toBe(200)
+  const body = ingestResultSchema.parse(await res.json())
+  expect(body.accepted).toEqual(['codex:primary'])
   cleanup()
 })
 
