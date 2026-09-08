@@ -1,4 +1,5 @@
 {
+  "name": "limit-monitor",
   "version": "0.1.0",
   "private": true,
   "workspaces": [
@@ -16,7 +17,8 @@
     "predev:hub": "npm run build -w shared",
     "dev:hub": "npm run dev -w hub"
   },
-  "dependencies": {
+  "dependencies": {},
+  "devDependencies": {
     "vite-plus": "^0.1.24"
   }
 }
