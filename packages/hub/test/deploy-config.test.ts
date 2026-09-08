@@ -1096,7 +1096,10 @@ function runSyncHubCorsOrigin(opts: { hubCors: string; dashboardOrigin: string }
   const source = path.join(dir, 'hub.env')
   const dest = path.join(dir, 'hub-effective.env')
   try {
-    fs.writeFileSync(source, `APP_ENV=production\nCORS_ALLOWED_ORIGINS=${opts.hubCors}\nDB_FILE_PATH=/safe/path\n`)
+    fs.writeFileSync(
+      source,
+      `APP_ENV=production\nCORS_ALLOWED_ORIGINS=${opts.hubCors}\nDB_FILE_PATH=/safe/path\n`
+    )
     const harness = [
       'set -euo pipefail',
       extractBashFn('trim_space'),

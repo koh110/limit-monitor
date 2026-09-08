@@ -48,7 +48,10 @@ test('payload の sourceId が異なっても token の sourceId に正規化し
     now
   })
   expect(result.accepted).toEqual(['codex:primary'])
-  const [row] = await db.select({ sourceId: latestLimits.sourceId }).from(latestLimits).where(eq(latestLimits.bucketId, 'codex:primary'))
+  const [row] = await db
+    .select({ sourceId: latestLimits.sourceId })
+    .from(latestLimits)
+    .where(eq(latestLimits.bucketId, 'codex:primary'))
   expect(row?.sourceId).toBe('dev-machine')
   cleanup()
 })
