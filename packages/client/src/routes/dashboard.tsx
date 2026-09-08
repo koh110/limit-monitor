@@ -10,7 +10,7 @@ export function dashboardLoader() {
 }
 
 export function Dashboard() {
-  const result = useLoaderData() as Awaited<ReturnType<typeof dashboardLoader>>
+  const result = useLoaderData<typeof dashboardLoader>()
   const { revalidate } = useRevalidator()
   const now = new Date()
 
