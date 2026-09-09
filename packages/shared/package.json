@@ -1,0 +1,71 @@
+{
+  "name": "shared",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    },
+    "./src/index": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    },
+    "./src/contracts": {
+      "types": "./dist/src/contracts.d.ts",
+      "default": "./dist/src/contracts.js"
+    },
+    "./src/schema": {
+      "types": "./dist/src/schema.d.ts",
+      "default": "./dist/src/schema.js"
+    },
+    "./src/freshness": {
+      "types": "./dist/src/freshness.d.ts",
+      "default": "./dist/src/freshness.js"
+    },
+    "./src/remaining": {
+      "types": "./dist/src/remaining.d.ts",
+      "default": "./dist/src/remaining.js"
+    },
+    "./src/selection": {
+      "types": "./dist/src/selection.d.ts",
+      "default": "./dist/src/selection.js"
+    },
+    "./src/db/schema": {
+      "types": "./dist/src/db/schema.d.ts",
+      "default": "./dist/src/db/schema.js"
+    }
+  },
+  "scripts": {
+    "compile": "tsp compile .",
+    "format-tsp": "tsp format \"**/*.tsp\"",
+    "preopenapi-ts": "npm run compile",
+    "openapi-ts": "openapi-typescript ./tsp-output/schema/openapi.yaml --output ./src/generated/schema.ts && vp fmt src/generated --write",
+    "prebuild": "npm run openapi-ts",
+    "build": "tsc --build tsconfig.json",
+    "tsc": "tsc --build tsconfig.test.json",
+    "vitest": "vp test run --config=./vite.config.ts",
+    "test": "concurrently \"npm run tsc\" \"npm run vitest\"",
+    "test-ci": "vp test run --config=./vite.config.ts --maxWorkers=1",
+    "preformat": "npm run format-tsp",
+    "format": "vp fmt package.json src bin --write",
+    "format-check": "vp fmt package.json src bin --check",
+    "check-missing-4xx-responses": "node --experimental-strip-types ./bin/check-missing-4xx-responses.ts",
+    "lint": "npm run compile && vp lint src bin && npm run check-missing-4xx-responses",
+    "lint-fix": "vp lint src bin --fix"
+  },
+  "dependencies": {
+    "drizzle-orm": "1.0.0-rc.4",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.5",
+    "@typespec/compiler": "^1.15.0",
+    "@typespec/http": "^1.15.0",
+    "@typespec/openapi": "^1.15.0",
+    "@typespec/openapi3": "^1.15.0",
+    "concurrently": "^9.2.4",
+    "openapi-typescript": "^7.9.1",
+    "typescript": "^6.0.3"
+  }
+}

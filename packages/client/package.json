@@ -1,0 +1,32 @@
+{
+  "name": "client",
+  "private": true,
+  "scripts": {
+    "dev": "vp",
+    "tsc": "tsc --noEmit",
+    "build": "vp build",
+    "start": "vp preview --host 0.0.0.0 --port 3000",
+    "test": "vp test --config=./vite.config.ts",
+    "test-ci": "vp test run --config=./vite.config.ts --maxWorkers=1",
+    "format": "vp fmt package.json index.html src --write",
+    "format-check": "vp fmt package.json index.html src --check",
+    "lint": "vp lint src",
+    "lint-fix": "vp lint src --fix"
+  },
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-router-dom": "^7.18.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/react": "^16.3.0",
+    "@types/node": "^25.9.5",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.0",
+    "happy-dom": "^20.11.0",
+    "typescript": "^6.0.3"
+  }
+}

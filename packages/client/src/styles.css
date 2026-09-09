@@ -1,0 +1,269 @@
+:root {
+  --bg: #101418;
+  --panel: #1a2027;
+  --panel-border: #2a323c;
+  --text: #e6ebf0;
+  --text-dim: #8b98a5;
+  --green: #34c176;
+  --yellow: #e2b93b;
+  --red: #e5534b;
+  --gray: #6e7b8a;
+  --darkgray: #3d4650;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    'Hiragino Sans',
+    'Noto Sans JP',
+    sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+.dashboard {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.dashboard-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.dashboard-head h1 {
+  font-size: 1.25rem;
+  margin: 0;
+}
+
+.hub-state {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.hub-online {
+  color: var(--text-dim);
+}
+
+.hub-offline {
+  color: var(--red);
+  font-weight: 700;
+}
+
+/* 片手で確認できるカード型 UI(mobile first) */
+.cards {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+@media (min-width: 640px) {
+  .cards {
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  }
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.provider {
+  font-size: 1rem;
+  margin: 0;
+}
+
+.alias {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+.buckets {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.bucket {
+  border-top: 1px solid var(--panel-border);
+  padding-top: 12px;
+}
+
+.bucket-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.bucket-label {
+  font-weight: 700;
+}
+
+.freshness {
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-border);
+  color: var(--text-dim);
+}
+
+.freshness-fresh {
+  color: var(--green);
+  border-color: var(--green);
+}
+
+.freshness-expired {
+  color: var(--red);
+  border-color: var(--red);
+}
+
+.remaining {
+  margin: 8px 0 4px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.remaining-caption {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+.remaining-value {
+  font-size: 2rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.reached {
+  font-size: 0.7rem;
+  color: var(--red);
+  border: 1px solid var(--red);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.meter {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--darkgray);
+  overflow: hidden;
+}
+
+.meter-fill {
+  height: 100%;
+  border-radius: 999px;
+}
+
+/* 仕様 9.2 の表示ルール: 残量ベースの色 + stale/expired はグレー */
+.tone-green .remaining-value,
+.tone-green .meter-fill {
+  color: var(--green);
+  background: var(--green);
+}
+
+.tone-yellow .remaining-value,
+.tone-yellow .meter-fill {
+  color: var(--yellow);
+  background: var(--yellow);
+}
+
+.tone-red .remaining-value,
+.tone-red .meter-fill {
+  color: var(--red);
+  background: var(--red);
+}
+
+.tone-gray .remaining-value,
+.tone-gray .meter-fill {
+  color: var(--gray);
+  background: var(--gray);
+}
+
+.tone-darkgray .remaining-value,
+.tone-darkgray .meter-fill {
+  color: var(--darkgray);
+  background: var(--darkgray);
+}
+
+.tone-green .remaining-value,
+.tone-yellow .remaining-value,
+.tone-red .remaining-value,
+.tone-gray .remaining-value,
+.tone-darkgray .remaining-value {
+  background: none;
+}
+
+.bucket-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0 0;
+  font-size: 0.75rem;
+}
+
+.bucket-meta dt {
+  color: var(--text-dim);
+  margin-bottom: 2px;
+}
+
+.bucket-meta dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.until-reset {
+  display: block;
+  color: var(--text-dim);
+}
+
+.empty {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--text-dim);
+}
+
+.empty-value {
+  font-size: 2.5rem;
+  font-weight: 700;
+  margin: 0 0 8px;
+  color: var(--darkgray);
+}
+
+.empty.offline .empty-value {
+  color: var(--red);
+}
+
+.empty-hint {
+  font-size: 0.75rem;
+}

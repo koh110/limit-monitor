@@ -1,0 +1,18 @@
+{
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "lint": "npm run lint --workspaces --if-present",
+    "format": "npm run format --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "predev:client": "npm run build -w shared",
+    "dev:client": "npm run dev -w client",
+    "predev:hub": "npm run build -w shared",
+    "dev:hub": "npm run dev -w hub"
+  },
+  "dependencies": {
+    "vite-plus": "^0.1.24"
+  }
+}

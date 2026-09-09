@@ -1,0 +1,15 @@
+node_modules/
+dist/
+tsp-output/
+packages/shared/src/generated/
+.next/
+.env
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+data/
+npm-debug.log*
+tsconfig.tsbuildinfo
+tsconfig.*.tsbuildinfo
+.DS_Store

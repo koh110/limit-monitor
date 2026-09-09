@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "types": ["node"],
+    "incremental": true,
+    "strict": true,
+    "outDir": "dist",
+    "sourceMap": true,
+    "esModuleInterop": true,
+    "target": "esnext",
+    "lib": ["ESNext"],
+    "module": "nodenext",
+    "skipLibCheck": true,
+    "noUncheckedIndexedAccess": true,
+    "rootDir": "./"
+  },
+  "include": ["src"],
+  "exclude": ["dist", "node_modules", "**/*.test.ts"],
+  "references": [{ "path": "../shared" }]
+}
