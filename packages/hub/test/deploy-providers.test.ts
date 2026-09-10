@@ -11,26 +11,13 @@ function runDeploy(args: readonly string[]) {
   const result = spawnSync(process.execPath, ['--experimental-strip-types', DEPLOY_TS, ...args], {
     cwd: REPO_ROOT,
     encoding: 'utf8',
-    env: {
-      PATH: process.env.PATH ?? '',
-      HOME: process.env.HOME ?? '',
-      ...HUB_URL_ENV
-    }
+    env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', ...HUB_URL_ENV }
   })
-  return {
-    code: result.status ?? 1,
-    out: result.stdout ?? '',
-    err: result.stderr ?? ''
-  }
+  return { code: result.status ?? 1, out: result.stdout ?? '', err: result.stderr ?? '' }
 }
 
 test('deploy.ts: --providers を collector deploy へ渡す', () => {
-  const result = runDeploy([
-    '--collector',
-    '--providers',
-    'codex,claude,grok',
-    '--dry-run'
-  ])
+  const result = runDeploy(['--collector', '--providers', 'codex,claude,grok', '--dry-run'])
 
   expect(result.code, result.err).toBe(0)
   expect(result.out.trim()).toBe(
