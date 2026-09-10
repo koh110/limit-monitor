@@ -6,6 +6,8 @@ on:
       - fix/persist-deploy-providers
     paths:
       - .github/workflows/apply-provider-persistence.yml
+      - .github/scripts/persist-deploy-providers.py
+      - .github/scripts/fix-provider-persistence-tests.py
 
 permissions:
   contents: write
