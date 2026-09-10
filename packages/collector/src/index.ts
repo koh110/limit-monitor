@@ -7,6 +7,7 @@ import {
   COLLECTOR_MODE,
   COLLECTOR_VERSION,
   COMMAND_TIMEOUT_MS,
+  GROK_BIN,
   HUB_TOKEN,
   HUB_TOKEN_FILE,
   HUB_URL,
@@ -22,6 +23,7 @@ import { judgeStartupCycle } from './outcome.js'
 import { sendObservation } from './send.js'
 import { createClaudeReader } from './sources/claude.js'
 import { createCodexReader } from './sources/codex.js'
+import { createGrokReader } from './sources/grok.js'
 
 function readToken(): string {
   // 運用は systemd LoadCredential で注入した file を優先する(仕様 12.3)
@@ -45,6 +47,11 @@ function createRealReaders(): ProviderReaders {
     }),
     claude: createClaudeReader({
       command: CLAUDE_BIN,
+      timeoutMs: COMMAND_TIMEOUT_MS,
+      maxStdoutBytes: MAX_STDOUT_BYTES
+    }),
+    grok: createGrokReader({
+      command: GROK_BIN,
       timeoutMs: COMMAND_TIMEOUT_MS,
       maxStdoutBytes: MAX_STDOUT_BYTES
     })
