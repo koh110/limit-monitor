@@ -49,7 +49,9 @@ export function buildGrokBillingRequest(): string {
 function parseMessage(line: string): JsonRpcMessage | null {
   try {
     const parsed: unknown = JSON.parse(line)
-    return typeof parsed === 'object' && parsed !== null ? (parsed as JsonRpcMessage) : null
+    return typeof parsed === 'object' && parsed !== null
+      ? (parsed as JsonRpcMessage)
+      : null
   } catch {
     return null
   }
@@ -146,7 +148,11 @@ function readAgentBilling(options: GrokSourceOptions): Promise<GrokAgentOutcome>
         }
         if (message.id === GROK_INITIALIZE_ID) {
           if (message.error !== undefined) {
-            finish({ ok: false, reason: 'agent_error', detail: errorDetail(message.error) })
+            finish({
+              ok: false,
+              reason: 'agent_error',
+              detail: errorDetail(message.error)
+            })
             return
           }
           write(buildGrokBillingRequest())
@@ -154,11 +160,19 @@ function readAgentBilling(options: GrokSourceOptions): Promise<GrokAgentOutcome>
         }
         if (message.id === GROK_BILLING_ID) {
           if (message.error !== undefined) {
-            finish({ ok: false, reason: 'billing_error', detail: errorDetail(message.error) })
+            finish({
+              ok: false,
+              reason: 'billing_error',
+              detail: errorDetail(message.error)
+            })
             return
           }
           if (!('result' in message)) {
-            finish({ ok: false, reason: 'invalid_response', detail: 'grok billing response had no result' })
+            finish({
+              ok: false,
+              reason: 'invalid_response',
+              detail: 'grok billing response had no result'
+            })
             return
           }
           finish({ ok: true, result: message.result })
