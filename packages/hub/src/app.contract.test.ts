@@ -116,7 +116,7 @@ test('ingest の 403 は application/problem+json で返る', async () => {
   const res = await postObservation({
     app,
     token: issued.token,
-    payload: createPayload({ sourceId: 'other-machine' })
+    payload: createPayload({ accountAlias: 'other-account' })
   })
   expect(res.status).toBe(403)
   expect(res.headers.get('Content-Type')).toContain('application/problem+json')

@@ -1,18 +1,24 @@
 {
+  "name": "limit-monitor",
+  "version": "0.1.0",
   "private": true,
   "workspaces": [
     "packages/*"
   ],
+  "type": "module",
   "scripts": {
-    "lint": "npm run lint --workspaces --if-present",
-    "format": "npm run format --workspaces --if-present",
+    "lint": "vp lint deploy.ts && npm run lint --workspaces --if-present",
+    "format": "vp fmt package.json deploy.ts --write && npm run format --workspaces --if-present",
+    "format-check": "vp fmt package.json deploy.ts --check",
+    "tsc": "tsc --build tsconfig.json",
     "test": "npm run test --workspaces --if-present",
-    "predev:client": "npm run build -w shared",
-    "dev:client": "npm run dev -w client",
+    "predev:dashboard": "npm run build -w shared",
+    "dev:dashboard": "npm run dev -w dashboard",
     "predev:hub": "npm run build -w shared",
     "dev:hub": "npm run dev -w hub"
   },
-  "dependencies": {
+  "dependencies": {},
+  "devDependencies": {
     "vite-plus": "^0.1.24"
   }
 }

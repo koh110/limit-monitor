@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - 'packages/hub/**'
+      - 'deploy/**'
       - 'packages/shared/**'
       - 'package.json'
       - 'package-lock.json'
@@ -13,6 +14,7 @@ on:
     paths:
       - '.github/workflows/ci-hub.yml'
       - 'packages/hub/**'
+      - 'deploy/**'
       - 'packages/shared/**'
       - 'package.json'
       - 'package-lock.json'

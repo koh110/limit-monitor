@@ -16,8 +16,13 @@ flowchart TD
 ```
 
 - Hub は自宅 Linux サーバー(開発機)上で systemd により常駐する
+- Hub / Dashboard / Collector の 3 unit は **deploy を実行した通常ユーザー
+  (install user)** として動く。limit-monitor 専用の Linux user は作らず、
+  利用者に user / group を指定させない(`sudo` の SUDO_USER、または非 root
+  実行時の現在のユーザーから自動解決し、主体不明なら fail-closed)
 - Cloudflare はアプリ実行基盤・永続化先として使わず、iPhone からの private route のみに使う
-- Phase 1 では collector は fixture を送信する mock 実装
+- Phase 1 の collector は real 実行(既定 `COLLECTOR_MODE=real`)。
+  fixture 送信は `COLLECTOR_MODE=mock` を明示した場合のみ有効になる
 
 ## package 構成
 
@@ -28,7 +33,9 @@ limit-monitor/
                  # freshness/残量/最新値選択、Drizzle DB schema
     hub/         # Hono API server。Ingest/Status/health、token 管理 CLI、migration
     client/      # Vite + React + react-router Dashboard(SPA、Hub へ直接 CORS fetch)
-    collector/   # mock collector(Codex/Claude fixture 送信)
+    collector/   # real collector(既定)。Codex/Claude CLI から usage を観測し
+                 # Observation を Hub へ送信。mock(fixture 送信)は
+                 # COLLECTOR_MODE=mock の明示指定時のみ有効
   deploy/systemd/
   docs/
 ```
@@ -129,7 +136,7 @@ main.tsp --(tsp compile)--> tsp-output/schema/openapi.yaml
 Ingest の保護:
 
 - リクエストボディ上限 32KB(413)
-- token 認証失敗 401 / sourceId mismatch 403
+- token 認証失敗 401。認証成功後の`sourceId`はtokenに紐付く値へHub側で正規化する
 - sourceId 単位の in-memory fixed window rate limit(429)
 
 ## CORS(ブラウザ直接アクセス)
@@ -145,6 +152,10 @@ Hub 側で CORS を明示的に許可する必要がある(`packages/hub/src/con
 - `production`(`APP_ENV=production`)では `*` および未設定を fail closed で拒否し、
   起動時に例外で落とす。**明示的な origin 一覧を必ず設定すること**
   (例: `CORS_ALLOWED_ORIGINS=https://dashboard.example.com`)
+- 許可するのは「ブラウザが実際に送る origin」であり、Dashboard の bind address
+  (`HOST`、例: `0.0.0.0`)ではない。LAN bind の場合は
+  `dashboard.env` の `DASHBOARD_PUBLIC_ORIGIN` に相当する値を設定する
+  (localhost 既定 bind `HOST=127.0.0.1` のみ `http://127.0.0.1:8788` が導出される)
 - Collector からの ingest リクエストのように `Origin` header がない場合は
   CORS ヘッダーを付けない(CORS はブラウザ間のみの制約であり、Bearer token 認証とは独立)
 

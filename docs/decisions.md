@@ -11,6 +11,7 @@
 | Hub の配置 | 自宅 Linux 開発機 | 既存サーバーを流用し LAN 直結を優先 |
 | Hub listen port | `8787` | 仕様書の推奨例に従う |
 | 常駐方式 | systemd 主運用 | Docker Compose より単純で、Node 単体で完結する |
+| service 実行ユーザー | 専用 Linux user を作らず、install を実行した通常ユーザー(`sudo` の `SUDO_USER`、非 root なら現在のユーザー)へ 3 unit / state dir / token CLI を統一する。user / group の指定入口(option・環境変数)は持たず、主体不明なら fail-closed | OSS 利用者の環境に固定アカウントを増やさない。real mode の collector は `codex` / `claude` CLI を起動し CLI 自身が HOME 配下の login 情報を読むため、実際に login 済みのアカウントで動かす必要がある |
 | Web framework | Hono + `@hono/node-server` | service-template 準拠 |
 | Dashboard | Vite + React + react-router data-loader + 直接 CORS fetch | service-template 準拠 |
 | monorepo | npm workspaces(`packages/*`) | service-template 準拠 |
@@ -24,7 +25,7 @@
 | Node.js | 24.x | `node:sqlite` と strip-types を利用 |
 | Collector(Phase 1) | Linux 上で Codex/Claude fixture を送信する mock | 仕様 15 Phase 1(mock observation 送信) |
 | API 契約の単一ソース | TypeSpec(`packages/shared/main.tsp` + `typespec/*.tsp`)→ OpenAPI 3.1 → `openapi-typescript` | service-template 準拠。契約からの型生成で Hub の route/validator/response を機械的に固定する |
-| 生成物の管理 | `src/generated/schema.ts` と中間生成物 `tsp-output/` は gitignore。build時にTypeSpecから生成する | TypeSpecの結果をcommitせず、常に正本から再生成する。契約変更はTypeSpecソースと型検査でレビューする |
+| 生成物の管理 | `src/generated/schema.ts` と中間生成物 `tsp-output/` は gitignore。build時にTypeSpecから生成する | TypeSpecの結果をcommitせず、常に基準となるソースから再生成する。契約変更はTypeSpecソースと型検査でレビューする |
 | runtime 検証 | zod/mini を維持し、TypeSpec 生成型は compile time 専用 | 生成型は runtime 検証を持たないため置き換え不可。両者の一致は `src/schema.test.ts` の型レベル相互代入で強制する |
 | 生成コードの整形 | `openapi-ts` の末尾で `vp fmt src/generated --write` を実行する | ローカル生成物もformat-checkを通る状態にする |
 | `npm install` | ローカルの依存追加時は `npm install --force` が必要 | `openapi-typescript@7` の peer が `typescript@^5.x` で、本リポジトリの `typescript@6` と衝突する。`--legacy-peer-deps` は vite/rolldown の peer を落とすため使わない。CI の `npm ci` は lockfile どおり動くため影響なし |

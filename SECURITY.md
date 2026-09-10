@@ -28,7 +28,7 @@ Hub へ送信してよいのは正規化された数値情報のみ:
 
 - Collector ごとに個別の Bearer token を発行する(`npm run tokens -w hub -- issue`)
 - Hub は token の SHA-256 hash のみを保存し、平文を保存しない
-- token は対応する sourceId のみ書き込め、mismatch は 403
+- token 認証成功時に、保存する`sourceId`はtokenに紐付く値へHub側で正規化する。payloadの`sourceId`は表示用入力として受け取るが、認証・保存の基準にはしない。
 - 失効(revoke)と再発行(reissue)が可能
 - 認証失敗は 401
 

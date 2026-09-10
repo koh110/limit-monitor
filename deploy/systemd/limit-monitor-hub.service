@@ -1,0 +1,54 @@
+# Limit Hub systemd unit template
+# 配置例: /etc/systemd/system/limit-monitor-hub.service
+#
+# 配置先と DB path は unit を書き換えずに EnvironmentFile で切り替える:
+#   sudo install -d -m 755 /etc/limit-monitor
+#   sudo install -m 644 deploy/hub.env.example /etc/limit-monitor/hub.env
+# ExecStart の引数中の ${INSTALL_DIR} は systemd が展開する。
+# ExecStart の node path(/usr/bin/node)は deploy/deploy.sh --install-systemd が
+# 実行環境の実際 path(command -v node)へ置換して render・配置する。
+# 手動で配置する場合は実 path へ書き換えること。
+[Unit]
+Description=Limit Monitor Hub (Codex/Claude usage limit aggregator)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 実行ユーザーは deploy を実行した通常ユーザー(install user)。
+# limit-monitor 専用の Linux user は作らないし前提にもしない。
+# deploy/deploy.sh --install-systemd が SUDO_USER(sudo 経由)または現在の
+# ユーザーから自動解決した user:group で placeholder を埋めて配置する(利用者に
+# user / group の指定は求めない。root 直接で主体不明なら fail-closed)。
+# 手動で unit を置く場合はここを実アカウントへ書き換える。
+User=CHANGE_ME
+Group=CHANGE_ME
+
+# 既定値。あとの EnvironmentFile が同じ変数を上書きする
+Environment=INSTALL_DIR=/var/www/limit-monitor
+Environment=APP_ENV=production
+Environment=PORT=8787
+Environment=DB_FILE_PATH=/var/lib/limit-monitor/limit-monitor.sqlite
+# `-` 付きでファイルが無くても起動できるようにする(既定値で動く)
+EnvironmentFile=-/etc/limit-monitor/hub.env
+
+# DB_FILE_PATH は絶対 path で指定する前提のため WorkingDirectory は固定しない
+WorkingDirectory=/
+# 起動時に migration が自動適用される
+ExecStart=/usr/bin/node ${INSTALL_DIR}/current/packages/hub/dist/src/index.js
+Restart=always
+RestartSec=5
+
+# hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+# /var/lib/limit-monitor を上記 User=(= 解決済み install user)の所有・mode 0755 で
+# 用意し、書き込み可能にする。専用ユーザーは作らず、ディレクトリ名だけがアプリ名。
+# deploy/deploy.sh も同じ owner / mode を配置前に検証し、配置後に read-back する。
+# DB_FILE_PATH をここ以外へ置く場合は drop-in で ReadWritePaths を追加すること
+StateDirectory=limit-monitor
+
+[Install]
+WantedBy=multi-user.target

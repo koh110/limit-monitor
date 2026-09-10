@@ -65,6 +65,11 @@ body {
   font-weight: 700;
 }
 
+/* hydration 完了前(HydrateFallback)。Hub の生死がまだ確定していない状態 */
+.hub-pending {
+  color: var(--text-dim);
+}
+
 /* 片手で確認できるカード型 UI(mobile first) */
 .cards {
   display: grid;

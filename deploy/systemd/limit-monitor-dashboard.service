@@ -1,0 +1,56 @@
+# Limit Monitor Dashboard systemd unit template
+# 配置例: /etc/systemd/system/limit-monitor-dashboard.service
+#
+# Dashboard は Node.js 常駐サービスとして static build を配信する
+# (nginx などの Web サーバーは使わない)。Hub とは別 service なので、
+# 同一ホストで Hub / 他サービスと同居できる。
+#
+# 配置先・bind address・port は unit を書き換えずに EnvironmentFile で切り替える:
+#   sudo install -d -m 755 /etc/limit-monitor
+#   sudo install -m 644 deploy/dashboard.env.example /etc/limit-monitor/dashboard.env
+# ExecStart の引数中の ${INSTALL_DIR} は systemd が展開する。
+# ExecStart の node path(/usr/bin/node)は deploy/deploy.sh --install-systemd が
+# 実行環境の実際 path(command -v node)へ置換して render・配置する。
+# 手動で配置する場合は実 path へ書き換えること。
+[Unit]
+Description=Limit Monitor Dashboard (static SPA served by Node.js)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Hub / Collector と同じ実行ユーザー(deploy を実行した通常ユーザー = install user)。
+# 専用の Linux user は作らない。deploy/deploy.sh --install-systemd が SUDO_USER
+# または現在のユーザーから自動解決した user:group で placeholder を埋めて配置する
+# (利用者に user / group の指定は求めない)。read only で dist を配信するだけ。
+User=CHANGE_ME
+Group=CHANGE_ME
+
+# 既定値。あとの EnvironmentFile が同じ変数を上書きする
+Environment=INSTALL_DIR=/var/www/limit-monitor
+# 既定は localhost のみ。LAN へ出す場合だけ dashboard.env で明示的に変える
+# (LAN bind では dashboard.env の DASHBOARD_PUBLIC_ORIGIN も必須になる)
+Environment=HOST=127.0.0.1
+# 他サービスと同居させるため port は必ず設定で変えられる
+Environment=PORT=8788
+# `-` 付きでファイルが無くても起動できるようにする(既定値で動く)
+EnvironmentFile=-/etc/limit-monitor/dashboard.env
+
+# 配信 root は ExecStart の位置から相対で決まるため WorkingDirectory は固定しない
+WorkingDirectory=/
+ExecStart=/usr/bin/node ${INSTALL_DIR}/current/packages/client/dist/server/index.js
+Restart=always
+RestartSec=5
+
+# hardening(静的ファイルを読むだけなので書き込みは一切不要)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
