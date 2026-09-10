@@ -18,7 +18,7 @@ export const COLLECTOR_VERSION = '0.1.0' as const
 
 /**
  * collector の動作モード。
- * - `real`(既定): 手元にインストールされた Codex CLI / Claude Code から実値を取得する
+ * - `real`(既定): 手元にインストールされた Codex CLI / Claude Code / Grok Build から実値を取得する
  * - `mock`: fixture を送信する。明示的に指定した場合のみ有効
  *
  * 未知の値は起動時に落とす(誤設定を黙って real/mock のどちらかに寄せない)。
@@ -38,6 +38,7 @@ export function resolveCollectorMode(raw: string | undefined): CollectorMode {
 
 /** 送信対象 provider。未知の provider 名は起動時に落とす */
 export function resolveProviders(raw: string | undefined): Provider[] {
+  // Grok は opt-in。既存 install で Grok CLI 未導入のまま upgrade しても壊さない。
   const trimmed = (raw ?? 'codex,claude').trim()
   const names = trimmed
     .split(',')
@@ -114,6 +115,7 @@ export const INTERVAL_SECONDS = resolveNonNegativeInt({
 // vendor CLI の実行 path。systemd 配下では PATH が細いため明示指定できるようにする
 export const CLAUDE_BIN = process.env.CLAUDE_BIN ?? 'claude'
 export const CODEX_BIN = process.env.CODEX_BIN ?? 'codex'
+export const GROK_BIN = process.env.GROK_BIN ?? 'grok'
 
 // vendor CLI 実行の有限 timeout。CLI の cold start を見込んで既定 60 秒
 export const COMMAND_TIMEOUT_MS = resolvePositiveInt({
