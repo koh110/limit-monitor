@@ -60,7 +60,8 @@ function periodInfo(config: Record<string, unknown>): {
   windowDurationSeconds: number | null
 } {
   const currentPeriod = isRecord(config.currentPeriod) ? config.currentPeriod : null
-  const periodType = currentPeriod && typeof currentPeriod.type === 'string' ? currentPeriod.type : null
+  const periodType =
+    currentPeriod && typeof currentPeriod.type === 'string' ? currentPeriod.type : null
   const start = normalizeIso(currentPeriod?.start ?? config.billingPeriodStart)
   const end = normalizeIso(currentPeriod?.end ?? config.billingPeriodEnd)
 
@@ -103,7 +104,8 @@ export function buildGrokObservation({
   }
   const config = payload.config
   const currentPercent = finiteNumber(config.creditUsagePercent)
-  const usedPercent = currentPercent === null ? readLegacyPercent(config) : clampPercent(currentPercent)
+  const usedPercent =
+    currentPercent === null ? readLegacyPercent(config) : clampPercent(currentPercent)
   if (usedPercent === null) {
     return null
   }
