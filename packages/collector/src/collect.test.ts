@@ -1,11 +1,11 @@
 import { expect, test } from 'vite-plus/test'
-import type { Observation } from 'shared/src/contracts'
+import type { Observation, Provider } from 'shared/src/contracts'
 import { collectObservations, createFixtureReaders, selectReaders } from './collect.js'
 import type { ProviderReaders } from './collect.js'
 
 const OBSERVED_AT = '2026-09-01T11:36:47.683Z'
 
-function observation(provider: 'codex' | 'claude'): Observation {
+function observation(provider: Provider): Observation {
   return {
     schemaVersion: 1,
     provider,
@@ -42,6 +42,9 @@ function stubReaders({
       return claudeOk
         ? { ok: true, observation: observation('claude') }
         : { ok: false, reason: 'timeout', detail: 'claude timed out' }
+    },
+    grok: async () => {
+      return { ok: true, observation: observation('grok') }
     }
   }
 }
@@ -59,16 +62,16 @@ test('mock mode だけが fixture reader を使う', async () => {
   expect(result.ok).toBe(true)
 })
 
-test('fixture reader は codex / claude 両方の観測を作る', async () => {
+test('fixture reader は codex / claude / grok の観測を作る', async () => {
   const readers = createFixtureReaders()
   const outcomes = await collectObservations({
-    providers: ['codex', 'claude'],
+    providers: ['codex', 'claude', 'grok'],
     readers,
     sourceId: 'dev-machine',
     observedAt: OBSERVED_AT
   })
-  expect(outcomes.map((outcome) => outcome.ok)).toEqual([true, true])
-  expect(outcomes.map((outcome) => outcome.provider)).toEqual(['codex', 'claude'])
+  expect(outcomes.map((outcome) => outcome.ok)).toEqual([true, true, true])
+  expect(outcomes.map((outcome) => outcome.provider)).toEqual(['codex', 'claude', 'grok'])
 })
 
 test('provider 単位で失敗が独立し、他 provider を止めない', async () => {
@@ -101,6 +104,9 @@ test('reader が throw しても outcome として回収する', async () => {
     },
     claude: async () => {
       return { ok: true, observation: observation('claude') }
+    },
+    grok: async () => {
+      return { ok: true, observation: observation('grok') }
     }
   }
   const outcomes = await collectObservations({
