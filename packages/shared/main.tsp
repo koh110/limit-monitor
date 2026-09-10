@@ -16,6 +16,7 @@ alias SchemaVersion = 1;
 enum Provider {
   codex,
   claude,
+  grok,
 }
 
 /** 生のアカウント ID / メールアドレスの混入を防ぐため `@` 等は許可しない */
