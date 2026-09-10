@@ -17,8 +17,6 @@ export type GrokBillingContext = {
 }
 
 type GrokUnifiedLogLine = {
-  message?: string | null
-  msg?: string | null
   ctx?: GrokBillingContext | null
 }
 
@@ -47,6 +45,11 @@ function periodLabel(type: string | null | undefined): string {
 }
 
 export function parseGrokBillingLine(line: string): GrokBillingContext | null {
+  // unified logger の message field 名に依存せず、billing event の識別文字列と
+  // 構造化 ctx の両方を確認する。ログ format の周辺 metadata 変更に耐えるため。
+  if (!line.includes(BILLING_MESSAGE)) {
+    return null
+  }
   let parsed: unknown
   try {
     parsed = JSON.parse(line)
@@ -57,8 +60,7 @@ export function parseGrokBillingLine(line: string): GrokBillingContext | null {
     return null
   }
   const value = parsed as GrokUnifiedLogLine
-  const message = value.message ?? value.msg
-  if (message !== BILLING_MESSAGE || value.ctx == null || typeof value.ctx !== 'object') {
+  if (value.ctx == null || typeof value.ctx !== 'object') {
     return null
   }
   return value.ctx
