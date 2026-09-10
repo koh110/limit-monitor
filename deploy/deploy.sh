@@ -620,7 +620,7 @@ render_unit_from_template() {
   local unit_type rendered_type
   # --providers 指定時は EnvironmentFile より後ろに Environment= を追加し、
   # env ファイルを編集せず deploy 時の選択を実効設定として固定する。
-  if [[ -n "${DEPLOY_COLLECTOR_PROVIDERS}" ]]; then
+  if [[ -n "${DEPLOY_COLLECTOR_PROVIDERS:-}" ]]; then
     local env_file_line_count
     env_file_line_count="$(grep -c '^EnvironmentFile=-/etc/limit-monitor/collector.env$' "$out" || true)"
     [[ "${env_file_line_count}" -eq 1 ]] \
@@ -980,7 +980,7 @@ normalize_collector_providers() {
 # collector.env の COLLECTOR_PROVIDERS を使う。
 effective_collector_providers() {
   local env_file="$1"
-  if [[ -n "${DEPLOY_COLLECTOR_PROVIDERS}" ]]; then
+  if [[ -n "${DEPLOY_COLLECTOR_PROVIDERS:-}" ]]; then
     printf '%s' "${DEPLOY_COLLECTOR_PROVIDERS}"
     return 0
   fi
@@ -1027,7 +1027,11 @@ resolve_collector_cli_path() {
 render_initial_collector_cli_bins() {
   local temp_env="$1"
   local providers codex_path claude_path
-  providers="$(normalize_collector_providers "$(effective_collector_providers "$temp_env")" 'collector providers')"
+  if [[ -n "${DEPLOY_COLLECTOR_PROVIDERS:-}" ]]; then
+    providers="${DEPLOY_COLLECTOR_PROVIDERS}"
+  else
+    providers="$(read_env_value "$temp_env" COLLECTOR_PROVIDERS '')"
+  fi
 
   # 選択された CLI provider だけを解決する。grok はローカル billing log を
   # 読むため vendor CLI path の検証を必要としない。
@@ -1074,9 +1078,13 @@ validate_collector_binaries() {
   # 除去して読むため、引用符付き値は検証値と実行時の値が食い違う。parser が
   # 引用符未対応であるため引用符を伴う値は明示 die する(引用符を除去した形
   # へ書き直すこと)。
-  providers="$(normalize_collector_providers "$(effective_collector_providers "$env_file")" "collector providers (${env_file})")"
+  if [[ -n "${DEPLOY_COLLECTOR_PROVIDERS:-}" ]]; then
+    providers="${DEPLOY_COLLECTOR_PROVIDERS}"
+  else
+    providers="$(read_env_value "$env_file" COLLECTOR_PROVIDERS '')"
+  fi
   [[ -n "$providers" ]] \
-    || die "collector providers are empty in ${env_file} (allowed: codex, claude, grok)"
+    || die "COLLECTOR_PROVIDERS is empty in ${env_file} (set a comma-separated list from codex,claude,grok)"
   if [[ "$providers" == *\"* || "$providers" == *\'* ]]; then
     die "COLLECTOR_PROVIDERS must not be quoted in ${env_file} (got: ${providers}); remove the quotes: the deploy parser does not strip quotes (systemd does), so the validated value would differ from the systemd value"
   fi
@@ -1166,7 +1174,7 @@ done
 # 対象サービスの選択は他の検証より先に確定させる(以降の検証はどの service を
 # install するかで分岐するため)。空 / 未知 / 重複は fail-closed
 resolve_selected_services
-if [[ -n "${DEPLOY_COLLECTOR_PROVIDERS}" ]]; then
+if [[ -n "${DEPLOY_COLLECTOR_PROVIDERS:-}" ]]; then
   [[ "${INSTALL_COLLECTOR}" -eq 1 ]] || die "--providers requires the collector service to be selected"
   DEPLOY_COLLECTOR_PROVIDERS="$(normalize_collector_providers "${DEPLOY_COLLECTOR_PROVIDERS}" '--providers')"
   log "collector providers selected by deploy option: ${DEPLOY_COLLECTOR_PROVIDERS}"
