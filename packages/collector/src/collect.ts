@@ -1,9 +1,11 @@
 import type { Provider } from 'shared/src/contracts'
 import { buildClaudeObservation } from './adapters/claude.js'
 import { buildCodexObservation } from './adapters/codex.js'
+import { buildGrokObservation } from './adapters/grok.js'
 import type { CollectorMode } from './config.js'
 import { createClaudeFixture } from './fixtures/claude.js'
 import { createCodexFixture } from './fixtures/codex.js'
+import { createGrokFixture } from './fixtures/grok.js'
 import type { ProviderReadResult, ProviderReader } from './sources/types.js'
 
 export type ProviderOutcome = { provider: Provider } & ProviderReadResult
@@ -35,6 +37,16 @@ export function createFixtureReaders(): ProviderReaders {
       return observation
         ? { ok: true, observation }
         : { ok: false, reason: 'no_rate_limits', detail: 'claude fixture produced no bucket' }
+    },
+    grok: async ({ sourceId, observedAt }) => {
+      const observation = buildGrokObservation({
+        payload: createGrokFixture(new Date(observedAt)),
+        sourceId,
+        observedAt
+      })
+      return observation
+        ? { ok: true, observation }
+        : { ok: false, reason: 'no_rate_limits', detail: 'grok fixture produced no bucket' }
     }
   }
 }
