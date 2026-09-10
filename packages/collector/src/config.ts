@@ -1,3 +1,5 @@
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import type { Provider } from 'shared/src/contracts'
 import { providerSchema } from 'shared/src/contracts'
 
@@ -18,7 +20,7 @@ export const COLLECTOR_VERSION = '0.1.0' as const
 
 /**
  * collector の動作モード。
- * - `real`(既定): 手元にインストールされた Codex CLI / Claude Code から実値を取得する
+ * - `real`(既定): 手元にインストールされた Codex CLI / Claude Code / Grok Build から実値を取得する
  * - `mock`: fixture を送信する。明示的に指定した場合のみ有効
  *
  * 未知の値は起動時に落とす(誤設定を黙って real/mock のどちらかに寄せない)。
@@ -111,9 +113,13 @@ export const INTERVAL_SECONDS = resolveNonNegativeInt({
   name: 'COLLECTOR_INTERVAL_SECONDS'
 })
 
-// vendor CLI の実行 path。systemd 配下では PATH が細いため明示指定できるようにする
+// vendor CLI 実行 path。systemd 配下では PATH が細いため明示指定できるようにする
 export const CLAUDE_BIN = process.env.CLAUDE_BIN ?? 'claude'
 export const CODEX_BIN = process.env.CODEX_BIN ?? 'codex'
+
+// Grok Build は認証情報ではなく CLI が生成する billing log のみを読む。
+export const GROK_LOG_FILE =
+  process.env.GROK_LOG_FILE ?? join(homedir(), '.grok', 'logs', 'unified.jsonl')
 
 // vendor CLI 実行の有限 timeout。CLI の cold start を見込んで既定 60 秒
 export const COMMAND_TIMEOUT_MS = resolvePositiveInt({
@@ -122,7 +128,7 @@ export const COMMAND_TIMEOUT_MS = resolvePositiveInt({
   name: 'COLLECTOR_COMMAND_TIMEOUT_MS'
 })
 
-// stdout の上限。想定応答は数 KB なので 1MB あれば十分に余裕がある
+// stdout / ローカル usage log の読み取り上限。想定応答は数 KB なので 1MB あれば十分に余裕がある
 export const MAX_STDOUT_BYTES = resolvePositiveInt({
   raw: process.env.COLLECTOR_MAX_STDOUT_BYTES,
   fallback: 1024 * 1024,
