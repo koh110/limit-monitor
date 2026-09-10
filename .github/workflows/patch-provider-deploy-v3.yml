@@ -1,0 +1,54 @@
+name: Patch provider deploy option v3
+
+on:
+  push:
+    branches:
+      - feature/grok-usage
+    paths:
+      - .github/workflows/patch-provider-deploy-v3.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: feature/grok-usage
+      - name: Reuse patch script with corrected match
+        run: |
+          python <<'PY2'
+          from pathlib import Path
+          import textwrap
+
+          workflow = Path('.github/workflows/patch-provider-deploy.yml').read_text()
+          start_marker = "          python <<'PY'\n"
+          end_marker = "\n          PY\n      - name: Commit patch"
+          start = workflow.index(start_marker) + len(start_marker)
+          end = workflow.index(end_marker, start)
+          script = textwrap.dedent(workflow[start:end])
+
+          wrong = '''marker = ''' + "'''" + '''  if [[ "${unit_name}" == "limit-monitor-collector.service" ]]; then
+            local unit_type rendered_type
+            unit_type="$(collector_unit_type)"
+          ''' + "'''"
+          correct = '''marker = ''' + "'''" + '''  if [[ "${unit_name}" == "limit-monitor-collector.service" ]]; then
+              local unit_type rendered_type
+              unit_type="$(collector_unit_type)"
+            ''' + "'''"
+          if wrong not in script:
+              raise SystemExit('expected old render marker was not found in patch workflow')
+          script = script.replace(wrong, correct, 1)
+          exec(compile(script, 'provider-deploy-patch', 'exec'))
+          PY2
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add deploy/deploy.sh
+          git diff --cached --check
+          git diff --cached --quiet && exit 0
+          git commit -m "feat(deploy): apply provider selection without env edits"
+          git push origin HEAD:feature/grok-usage
