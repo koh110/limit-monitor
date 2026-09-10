@@ -21,6 +21,7 @@ jobs:
         with:
           node-version: 24.x
       - run: python .github/scripts/persist-deploy-providers.py
+      - run: python .github/scripts/fix-provider-persistence-tests.py
       - run: bash -n deploy/deploy.sh
       - run: npm ci
       - run: npm run format -w hub
