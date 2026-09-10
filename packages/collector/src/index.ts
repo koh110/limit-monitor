@@ -7,6 +7,7 @@ import {
   COLLECTOR_MODE,
   COLLECTOR_VERSION,
   COMMAND_TIMEOUT_MS,
+  GROK_LOG_FILE,
   HUB_TOKEN,
   HUB_TOKEN_FILE,
   HUB_URL,
@@ -22,6 +23,7 @@ import { judgeStartupCycle } from './outcome.js'
 import { sendObservation } from './send.js'
 import { createClaudeReader } from './sources/claude.js'
 import { createCodexReader } from './sources/codex.js'
+import { createGrokReader } from './sources/grok.js'
 
 function readToken(): string {
   // 運用は systemd LoadCredential で注入した file を優先する(仕様 12.3)
@@ -34,7 +36,7 @@ function readToken(): string {
   throw new Error('HUB_TOKEN or HUB_TOKEN_FILE is required')
 }
 
-/** real mode の reader。手元にインストールされた各 CLI から実値を取得する */
+/** real mode の reader。手元にインストールされた各 CLI / ローカル usage log から実値を取得する */
 function createRealReaders(): ProviderReaders {
   return {
     codex: createCodexReader({
@@ -47,6 +49,10 @@ function createRealReaders(): ProviderReaders {
       command: CLAUDE_BIN,
       timeoutMs: COMMAND_TIMEOUT_MS,
       maxStdoutBytes: MAX_STDOUT_BYTES
+    }),
+    grok: createGrokReader({
+      logFile: GROK_LOG_FILE,
+      maxReadBytes: MAX_STDOUT_BYTES
     })
   }
 }
