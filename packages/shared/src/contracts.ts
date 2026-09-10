@@ -4,7 +4,7 @@ export const SCHEMA_VERSION = 1 as const
 
 export const MAX_BUCKETS_PER_OBSERVATION = 16 as const
 
-export const providerSchema = z.enum(['codex', 'claude'])
+export const providerSchema = z.enum(['codex', 'claude', 'grok'])
 export type Provider = z.infer<typeof providerSchema>
 
 // 生のアカウントID・メールアドレスの混入を防ぐため `@` 等を許可しない

@@ -1,18 +1,18 @@
 # limit-monitor
 
-Codex CLI / Claude Code の利用上限を収集し、Hub APIとWeb Dashboardで確認するNode.jsアプリケーションです。
+Codex CLI / Claude Code / Grok Build の利用上限を収集し、Hub APIとWeb Dashboardで確認するNode.jsアプリケーションです。
 
 ## 構成
 
 ```text
-Codex CLI / Claude Code
+Codex CLI / Claude Code / Grok Build
         │
         ▼
 limit-collector ──▶ limit-hub ──▶ limit-dashboard
                     SQLite       React SPA
 ```
 
-- `limit-collector`: ローカルのCodex / Claude CLIから実値を取得してHubへ送信
+- `limit-collector`: ローカルのCodex / Claude CLI、Grok Buildのbilling logから実値を取得してHubへ送信
 - `limit-hub`: 認証、観測値の保存、Dashboard向けAPI
 - `limit-dashboard`: Hub APIを表示するWeb Dashboard
 
@@ -22,8 +22,9 @@ limit-collector ──▶ limit-hub ──▶ limit-dashboard
 
 - Node.js 24.x
 - npm
-- Codex CLI / Claude Code（Collectorを使う場合）
-- Collectorを実行するユーザーでCodex / Claudeへlogin済みであること
+- 選択したproviderに応じて Codex CLI / Claude Code / Grok Build
+- Codex / Claudeを選ぶ場合は、Collectorを実行するユーザーで各CLIへlogin済みであること
+- Grokを選ぶ場合は、Collectorを実行するユーザーから`~/.grok/logs/unified.jsonl`を読めること
 
 ## 開発環境
 
@@ -56,7 +57,7 @@ SOURCE_ID=<source-id> \
 npm run start -w collector
 ```
 
-実CLIから収集する既定モード:
+実データから収集する既定モード:
 
 ```bash
 COLLECTOR_MODE=real
@@ -73,12 +74,12 @@ COLLECTOR_MODE=mock HUB_TOKEN=<token> SOURCE_ID=<source-id> \
 
 以下は**初めてsystemdへ配置する場合の順番**です。`collector-token`を配置する前にdeployすると、token不足で停止します。
 
-1. Collectorを実行する通常ユーザーでCodex / Claude Codeへloginします。
+1. 使用するproviderを決めます。Codex / Claudeを使う場合はCollectorを実行する通常ユーザーで各CLIへloginします。Grokは同ユーザーのbilling logを利用します。
 2. checkout rootでbuildを作成します（`sudo npm`は禁止）。
 3. state directoryをinstall user所有で作成します。
 4. production DBをmigrationし、Hub tokenを発行します。
 5. 発行されたtokenをroot所有・mode `600`で配置します。
-6. `sudo ./deploy.ts`を実行します。
+6. `sudo ./deploy.ts`を、使用するproviderを`--providers`で指定して実行します。
 
 ```bash
 # checkout rootで、Collectorを実行する通常ユーザーとして実行
@@ -107,8 +108,10 @@ sudo install -m 600 /dev/stdin /etc/limit-monitor/collector-token
 # 直接ファイルを配置/編集してもよい
 
 # systemdへ初回配置（Hub + Dashboard + Collector）
+# providerはenvを編集せずdeploy時に選択する
 sudo ./deploy.ts \
   --server --collector \
+  --providers codex,claude,grok \
   --hub-base-url http://127.0.0.1:8787
 ```
 
@@ -116,26 +119,40 @@ sudo ./deploy.ts \
 
 ## Deploy
 
-正規の入口はリポジトリrootの`deploy.ts`です。
+正規の入口はリポジトリrootの`deploy.ts`です。Collectorのproviderは`--providers`で選択し、通常は`collector.env`を編集しません。
 
 ```bash
 # Hub + Dashboard
 sudo ./deploy.ts --server --hub-base-url http://127.0.0.1:8787
 
-# Collector
-sudo ./deploy.ts --collector --hub-base-url http://127.0.0.1:8787
+# Collector: Codex + Claude + Grok
+sudo ./deploy.ts \
+  --collector \
+  --providers codex,claude,grok \
+  --hub-base-url http://127.0.0.1:8787
+
+# Grokだけ
+sudo ./deploy.ts \
+  --collector \
+  --providers grok \
+  --hub-base-url http://127.0.0.1:8787
 
 # 全サービス
-sudo ./deploy.ts --server --hub-base-url http://127.0.0.1:8787 --collector
+sudo ./deploy.ts \
+  --server --collector \
+  --providers codex,claude,grok \
+  --hub-base-url http://127.0.0.1:8787
 ```
 
-`--server`はHubとDashboard、`--collector`はCollectorを対象にします。何も指定しない場合や未知の引数は失敗します。同じ`package.json` versionを再配置する場合は、明示的に`--force`を追加します。
+`--server`はHubとDashboard、`--collector`はCollectorを対象にします。`--providers`は`--collector`と組み合わせ、`codex,claude,grok`から1つ以上をカンマ区切りで指定します。指定値は生成されるsystemd unitで`EnvironmentFile`より後に設定されるため、既存の`/etc/limit-monitor/collector.env`を書き換える必要はありません。`--providers`を省略した場合だけ、後方互換のため`collector.env`の`COLLECTOR_PROVIDERS`を使用します。
+
+何もサービスを指定しない場合や未知の引数は失敗します。同じ`package.json` versionを再配置する場合は、明示的に`--force`を追加します。
 
 Deployを実行した通常ユーザーが、3サービスのsystemd実行ユーザーになります。専用Linux userやgroupは作成しません。`sudo`経由では`SUDO_USER`とprimary groupを自動解決します。rootへ直接loginして実行する場合は拒否されます。
 
-Collectorをdeployする場合、同じinstallユーザーでCodex / Claude CLIへlogin済みである必要があります。既存のenv、token、手編集されたsystemd unitはdeployで黙って上書きしません。
+Codex / Claudeをproviderとして選ぶ場合、同じinstallユーザーで対象CLIへlogin済みである必要があります。Grokだけを選択した場合、Codex / Claude CLIはdeploy時に要求されません。既存のenv、token、手編集されたsystemd unitはdeployで黙って上書きしません。
 
-初回構築は上の「初回構築（localhost・最短手順）」を先に実行してください。既存hostの移行、rollback、CORS、systemd状態確認は[`docs/operations.md`](docs/operations.md)を参照してください。
+初回構築は上の「初回構築」を先に実行してください。既存hostの移行、rollback、CORS、systemd状態確認は[`docs/operations.md`](docs/operations.md)を参照してください。
 
 ## サービスと既定ポート
 

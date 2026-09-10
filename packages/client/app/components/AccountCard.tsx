@@ -10,7 +10,8 @@ const FRESHNESS_LABELS = {
 
 const PROVIDER_LABELS = {
   codex: 'Codex',
-  claude: 'Claude'
+  claude: 'Claude',
+  grok: 'Grok'
 } as const
 
 function BucketRow({ bucket, now }: { bucket: StatusBucket; now: Date }) {

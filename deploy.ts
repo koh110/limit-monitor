@@ -2,12 +2,13 @@
 /**
  * limit-monitor の正規 deploy 入口。
  *
- *   sudo ./deploy.ts --hub-base-url <url> --server              # Hub + Dashboard
- *   sudo ./deploy.ts --hub-base-url <url> --collector           # Collector
- *   sudo ./deploy.ts --hub-base-url <url> --server --collector  # 全サービス
+ *   sudo ./deploy.ts --hub-base-url <url> --server
+ *   sudo ./deploy.ts --hub-base-url <url> --collector --providers codex,claude,grok
+ *   sudo ./deploy.ts --hub-base-url <url> --server --collector --providers codex,claude,grok
  *
  * ここは薄い委譲層で、実処理は deploy/deploy.sh が行う。この入口の責務は:
  *   - 対象サービスの選択を明示的に受け取る(未選択 / 未知引数は fail-closed)
+ *   - collector の provider 選択を deploy option として受け取る
  *   - 正規化した repository root(realpath)から deploy/deploy.sh を実行する
  *
  * service 実行ユーザーは deploy を実行した通常ユーザーに統一する。専用の
@@ -17,6 +18,7 @@
  *
  * 秘密値は引数で渡さない。token は /etc/limit-monitor/collector-token
  * (root:root mode 600)へ置き、systemd の LoadCredential で注入する。
+ * provider 名は秘密値ではないため --providers で明示する。
  * この script は環境変数の値を出力しない(存在有無だけを検査する)。
  */
 import { spawnSync } from 'node:child_process'
@@ -26,6 +28,9 @@ import { fileURLToPath } from 'node:url'
 
 /** --services へ渡す対象。canonical な順序で保持する */
 export type ServiceTarget = 'server' | 'collector'
+export type ProviderTarget = 'codex' | 'claude' | 'grok'
+
+const PROVIDER_TARGETS = ['codex', 'claude', 'grok'] as const satisfies readonly ProviderTarget[]
 
 export type ParsedArgs = {
   help: boolean
@@ -33,6 +38,8 @@ export type ParsedArgs = {
   force: boolean
   /** 選択順ではなく server -> collector の canonical 順 */
   services: ServiceTarget[]
+  /** 指定時は deploy 済み collector unit の実効 provider 一覧になる */
+  providers: ProviderTarget[] | undefined
   hubBaseUrl: string | undefined
 }
 
@@ -41,20 +48,25 @@ export type ParseResult = { ok: true; value: ParsedArgs } | { ok: false; message
 export const USAGE = `limit-monitor deploy
 
 使い方:
-  sudo ./deploy.ts --server --hub-base-url <url>              Hub + Dashboard を deploy する
-  sudo ./deploy.ts --collector --hub-base-url <url>           Collector を deploy する
-  sudo ./deploy.ts --server --collector --hub-base-url <url>  全サービスを deploy する
+  sudo ./deploy.ts --server --hub-base-url <url>                                      Hub + Dashboard を deploy する
+  sudo ./deploy.ts --collector --providers codex,claude,grok --hub-base-url <url>     Collector を deploy する
+  sudo ./deploy.ts --server --collector --providers codex,claude,grok --hub-base-url <url>
+                                                                                       全サービスを deploy する
 
 引数:
   --server           limit-monitor-hub.service と limit-monitor-dashboard.service を対象にする
   --collector        limit-monitor-collector.service を対象にする
+  --providers        Collector の provider (comma区切り: codex,claude,grok)。
+                     指定値は systemd unit 側で EnvironmentFile より優先されるため、
+                     /etc/limit-monitor/collector.env の手編集は不要
   --hub-base-url     Dashboard に埋め込む Hub の URL(sudoの環境保持に依存しない)
   --force            同じ package.json version の既存 version directory を置き換える
   --dry-run          委譲先コマンドを表示するだけで実行しない
   -h, --help         このヘルプを表示する
 
 --server / --collector のどちらも指定しない場合は何も実行せずに終了する
-(fail-closed)。未知の引数も同様に拒否する。
+(fail-closed)。未知の引数も同様に拒否する。--providers は --collector と
+組み合わせた場合だけ受理する。省略時は既存 collector.env の設定を使う。
 
 service 実行ユーザーは deploy を実行した通常ユーザーに統一する。limit-monitor
 専用の Linux user は作らず、実行ユーザーの指定も求めない。sudo 経由なら
@@ -68,6 +80,39 @@ SUDO_USER から自動解決し、root 直接で主体が不明なら停止す�
 
 より細かい option は deploy/deploy.sh --help を参照する。`
 
+function parseProviderList(raw: string): { ok: true; providers: ProviderTarget[] } | { ok: false; message: string } {
+  const parts = raw.split(',')
+  if (parts.length === 0) {
+    return { ok: false, message: '--providers must list at least one provider' }
+  }
+
+  const providers: ProviderTarget[] = []
+  for (const part of parts) {
+    const name = part.trim()
+    if (name.length === 0) {
+      return {
+        ok: false,
+        message: `--providers contains an empty entry (got: ${raw})`
+      }
+    }
+    if (!PROVIDER_TARGETS.includes(name as ProviderTarget)) {
+      return {
+        ok: false,
+        message: `--providers contains an unknown provider: ${name} (allowed: ${PROVIDER_TARGETS.join(',')})`
+      }
+    }
+    const provider = name as ProviderTarget
+    if (providers.includes(provider)) {
+      return {
+        ok: false,
+        message: `--providers contains a duplicate provider: ${provider}`
+      }
+    }
+    providers.push(provider)
+  }
+  return { ok: true, providers }
+}
+
 /**
  * argv(実行ファイル名を除いた配列)を解析する。副作用なし。
  * 不正な入力は例外ではなく { ok: false } で返し、呼び出し側が fail-closed する。
@@ -78,6 +123,7 @@ export function parseArgs(argv: readonly string[]): ParseResult {
   let force = false
   let server = false
   let collector = false
+  let providers: ProviderTarget[] | undefined
   let hubBaseUrl: string | undefined
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -108,6 +154,22 @@ export function parseArgs(argv: readonly string[]): ParseResult {
         }
         collector = true
         break
+      case '--providers': {
+        if (providers !== undefined) {
+          return { ok: false, message: '--providers is specified more than once' }
+        }
+        const value = argv[i + 1]
+        if (value === undefined) {
+          return { ok: false, message: '--providers requires a comma-separated provider list' }
+        }
+        const parsedProviders = parseProviderList(value)
+        if (!parsedProviders.ok) {
+          return parsedProviders
+        }
+        providers = parsedProviders.providers
+        i += 1
+        break
+      }
       case '--hub-base-url': {
         const value = argv[i + 1]
         if (value === undefined || !/^https?:\/\//.test(value)) {
@@ -129,7 +191,7 @@ export function parseArgs(argv: readonly string[]): ParseResult {
   }
 
   if (help) {
-    return { ok: true, value: { help: true, dryRun, force, services: [], hubBaseUrl } }
+    return { ok: true, value: { help: true, dryRun, force, services: [], providers, hubBaseUrl } }
   }
 
   const services: ServiceTarget[] = []
@@ -145,8 +207,14 @@ export function parseArgs(argv: readonly string[]): ParseResult {
       message: 'no service selected: pass --server and/or --collector (nothing was deployed)'
     }
   }
+  if (providers !== undefined && !collector) {
+    return {
+      ok: false,
+      message: '--providers requires --collector (provider selection only applies to the collector)'
+    }
+  }
 
-  return { ok: true, value: { help: false, dryRun, force, services, hubBaseUrl } }
+  return { ok: true, value: { help: false, dryRun, force, services, providers, hubBaseUrl } }
 }
 
 /**
@@ -156,6 +224,9 @@ export function parseArgs(argv: readonly string[]): ParseResult {
  */
 export function buildDeployShArgs(parsed: ParsedArgs): string[] {
   const args = ['--install-systemd', '--services', parsed.services.join(',')]
+  if (parsed.providers !== undefined) {
+    args.push('--providers', parsed.providers.join(','))
+  }
   if (parsed.force) {
     args.push('--force')
   }
