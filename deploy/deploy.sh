@@ -98,6 +98,9 @@ fi
 
 # 対象サービスの選択(--services)。既定は server(hub + dashboard)と collector の両方。
 DEPLOY_SERVICES="${DEPLOY_SERVICES:-server,collector}"
+# deploy option 由来の collector provider。空なら collector.env を使う。
+DEPLOY_COLLECTOR_PROVIDERS="${DEPLOY_COLLECTOR_PROVIDERS:-}"
+DEPLOY_COLLECTOR_PROVIDERS_ARG_SEEN=0
 INSTALL_SERVER=0
 INSTALL_COLLECTOR=0
 
@@ -614,9 +617,20 @@ render_unit_from_template() {
   #    安全な値のまま保持し、env から render で上書きする。render 後の
   #    Type 妥当性は validate_rendered_units(systemd-analyze verify)で確認する
   if [[ "${unit_name}" == "limit-monitor-collector.service" ]]; then
-    local unit_type rendered_type
-    unit_type="$(collector_unit_type)"
-    sed -i "s|^Type=.*$|Type=${unit_type}|" "$out"
+  local unit_type rendered_type
+  # --providers 指定時は EnvironmentFile より後ろに Environment= を追加し、
+  # env ファイルを編集せず deploy 時の選択を実効設定として固定する。
+  if [[ -n "${DEPLOY_COLLECTOR_PROVIDERS}" ]]; then
+    local env_file_line_count
+    env_file_line_count="$(grep -c '^EnvironmentFile=-/etc/limit-monitor/collector.env$' "$out" || true)"
+    [[ "${env_file_line_count}" -eq 1 ]] \
+      || die "${unit_name} must contain exactly one collector EnvironmentFile line to apply --providers (got: ${env_file_line_count})"
+    sed -i "/^EnvironmentFile=-\/etc\/limit-monitor\/collector.env$/a Environment=COLLECTOR_PROVIDERS=${DEPLOY_COLLECTOR_PROVIDERS}" "$out"
+    grep -qxF "Environment=COLLECTOR_PROVIDERS=${DEPLOY_COLLECTOR_PROVIDERS}" "$out" \
+      || die "failed to render collector providers into ${unit_name}"
+  fi
+  unit_type="$(collector_unit_type)"
+  sed -i "s|^Type=.*$|Type=${unit_type}|" "$out"
     # render 済み unit に期待 Type が入ることを read-back で検証(fail-closed)
     rendered_type="$(sed -n 's|^Type=||p' "$out" | head -n1)"
     if [[ "${rendered_type}" != "${unit_type}" ]]; then
@@ -911,6 +925,68 @@ provider_list_has() {
   return 1
 }
 
+# provider list を検証・正規化する。CLI option と collector.env の双方で
+# 同じ許可集合 / 空要素 / 重複ルールを使う。
+normalize_collector_providers() {
+  local raw="$1"
+  local source="${2:-COLLECTOR_PROVIDERS}"
+  local element
+  local -a parts=()
+  local -a normalized=()
+  local -A seen=()
+
+  raw="$(trim_space "$raw")"
+  [[ -n "$raw" ]] \
+    || die "${source} must list at least one provider (allowed: codex, claude, grok)"
+  if [[ "$raw" == *\"* || "$raw" == *\'* ]]; then
+    die "${source} must not contain quotes (got: ${raw})"
+  fi
+
+  local rest="$raw"
+  local trailing_empty=0
+  if [[ "$rest" == *, ]]; then
+    rest="${rest%,}"
+    trailing_empty=1
+  fi
+  while [[ -n "$rest" ]]; do
+    case "$rest" in
+      *,*) parts+=("${rest%%,*}"); rest="${rest#*,}" ;;
+      *) parts+=("$rest"); rest="" ;;
+    esac
+  done
+  if [[ "$trailing_empty" -eq 1 ]]; then
+    parts+=("")
+  fi
+
+  for element in "${parts[@]}"; do
+    element="$(trim_space "$element")"
+    [[ -n "$element" ]] \
+      || die "${source} contains an empty provider entry (got: ${raw})"
+    case "$element" in
+      codex|claude|grok) ;;
+      *) die "${source} contains an unknown provider '${element}' (allowed: codex, claude, grok)" ;;
+    esac
+    [[ -z "${seen[$element]:-}" ]] \
+      || die "${source} contains a duplicate provider '${element}' (got: ${raw})"
+    seen["$element"]=1
+    normalized+=("$element")
+  done
+
+  local IFS=','
+  printf '%s' "${normalized[*]}"
+}
+
+# deploy option が指定されていればそれを実効値とし、未指定なら従来どおり
+# collector.env の COLLECTOR_PROVIDERS を使う。
+effective_collector_providers() {
+  local env_file="$1"
+  if [[ -n "${DEPLOY_COLLECTOR_PROVIDERS}" ]]; then
+    printf '%s' "${DEPLOY_COLLECTOR_PROVIDERS}"
+    return 0
+  fi
+  read_env_value "$env_file" COLLECTOR_PROVIDERS ''
+}
+
 # vendor CLI の path を INSTALL_USER の実行環境で解決する。
 #   - 呼び出し元 env(CODEX_BIN / CLAUDE_BIN)に明示値があればそれを優先
 #   - 未設定なら INSTALL_USER の login shell 経由で解決:
@@ -950,18 +1026,23 @@ resolve_collector_cli_path() {
 # $1 = render 済み temp collector.env の path
 render_initial_collector_cli_bins() {
   local temp_env="$1"
-  local codex_path claude_path
+  local providers codex_path claude_path
+  providers="$(normalize_collector_providers "$(effective_collector_providers "$temp_env")" 'collector providers')"
 
-  codex_path="$(resolve_collector_cli_path CODEX_BIN codex)" \
-    || die "codex CLI not found in ${INSTALL_USER} environment (resolve: runuser -u ${INSTALL_USER} -- <user_shell> -lc 'command -v -- codex')"
-  claude_path="$(resolve_collector_cli_path CLAUDE_BIN claude)" \
-    || die "claude CLI not found in ${INSTALL_USER} environment (resolve: runuser -u ${INSTALL_USER} -- <user_shell> -lc 'command -v -- claude')"
-
-  sed -i \
-    -e "s|^CODEX_BIN=.*|CODEX_BIN=${codex_path}|" \
-    -e "s|^CLAUDE_BIN=.*|CLAUDE_BIN=${claude_path}|" \
-    "$temp_env"
-  log "initial install: rendered resolved CLI paths into temp env (CODEX_BIN=${codex_path}, CLAUDE_BIN=${claude_path})"
+  # 選択された CLI provider だけを解決する。grok はローカル billing log を
+  # 読むため vendor CLI path の検証を必要としない。
+  if provider_list_has "codex" "$providers"; then
+    codex_path="$(resolve_collector_cli_path CODEX_BIN codex)" \
+      || die "codex CLI not found in ${INSTALL_USER} environment (resolve: runuser -u ${INSTALL_USER} -- <user_shell> -lc 'command -v -- codex')"
+    sed -i "s|^CODEX_BIN=.*|CODEX_BIN=${codex_path}|" "$temp_env"
+    log "initial install: rendered resolved Codex CLI path into temp env (CODEX_BIN=${codex_path})"
+  fi
+  if provider_list_has "claude" "$providers"; then
+    claude_path="$(resolve_collector_cli_path CLAUDE_BIN claude)" \
+      || die "claude CLI not found in ${INSTALL_USER} environment (resolve: runuser -u ${INSTALL_USER} -- <user_shell> -lc 'command -v -- claude')"
+    sed -i "s|^CLAUDE_BIN=.*|CLAUDE_BIN=${claude_path}|" "$temp_env"
+    log "initial install: rendered resolved Claude CLI path into temp env (CLAUDE_BIN=${claude_path})"
+  fi
 }
 
 # $1 = 検証対象の collector env ファイル(on-disk の /etc/limit-monitor/collector.env、
@@ -993,9 +1074,9 @@ validate_collector_binaries() {
   # 除去して読むため、引用符付き値は検証値と実行時の値が食い違う。parser が
   # 引用符未対応であるため引用符を伴う値は明示 die する(引用符を除去した形
   # へ書き直すこと)。
-  providers="$(read_env_value "$env_file" COLLECTOR_PROVIDERS '')"
+  providers="$(normalize_collector_providers "$(effective_collector_providers "$env_file")" "collector providers (${env_file})")"
   [[ -n "$providers" ]] \
-    || die "COLLECTOR_PROVIDERS is empty in ${env_file} (set a comma-separated list from codex,claude)"
+    || die "collector providers are empty in ${env_file} (allowed: codex, claude, grok)"
   if [[ "$providers" == *\"* || "$providers" == *\'* ]]; then
     die "COLLECTOR_PROVIDERS must not be quoted in ${env_file} (got: ${providers}); remove the quotes: the deploy parser does not strip quotes (systemd does), so the validated value would differ from the systemd value"
   fi
@@ -1022,8 +1103,8 @@ validate_collector_binaries() {
     element="$(trim_space "$element")"
     [[ -n "$element" ]] \
       || die "COLLECTOR_PROVIDERS has an empty element in ${env_file} (got: ${providers}); remove blank entries between commas"
-    if [[ "$element" != "codex" && "$element" != "claude" ]]; then
-      die "COLLECTOR_PROVIDERS has an unknown provider '${element}' in ${env_file} (allowed: codex, claude)"
+    if [[ "$element" != "codex" && "$element" != "claude" && "$element" != "grok" ]]; then
+      die "COLLECTOR_PROVIDERS has an unknown provider '${element}' in ${env_file} (allowed: codex, claude, grok)"
     fi
     if [[ -n "${provider_seen[$element]:-}" ]]; then
       die "COLLECTOR_PROVIDERS has a duplicate provider '${element}' in ${env_file} (got: ${providers})"
@@ -1068,6 +1149,13 @@ while [[ $# -gt 0 ]]; do
     --prepare-build) DEPLOY_PREPARE_BUILD=1; shift ;;
     --skip-npm-ci) SKIP_NPM_CI=1; shift ;;
     --services) DEPLOY_SERVICES="${2:-}"; shift 2 ;;
+    --providers)
+      [[ "${DEPLOY_COLLECTOR_PROVIDERS_ARG_SEEN}" -eq 0 ]] || die "--providers is specified more than once"
+      [[ -n "${2:-}" ]] || die "--providers requires a comma-separated list from codex,claude,grok"
+      DEPLOY_COLLECTOR_PROVIDERS="${2}"
+      DEPLOY_COLLECTOR_PROVIDERS_ARG_SEEN=1
+      shift 2
+      ;;
     -h|--help) print_usage; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
@@ -1078,6 +1166,11 @@ done
 # 対象サービスの選択は他の検証より先に確定させる(以降の検証はどの service を
 # install するかで分岐するため)。空 / 未知 / 重複は fail-closed
 resolve_selected_services
+if [[ -n "${DEPLOY_COLLECTOR_PROVIDERS}" ]]; then
+  [[ "${INSTALL_COLLECTOR}" -eq 1 ]] || die "--providers requires the collector service to be selected"
+  DEPLOY_COLLECTOR_PROVIDERS="$(normalize_collector_providers "${DEPLOY_COLLECTOR_PROVIDERS}" '--providers')"
+  log "collector providers selected by deploy option: ${DEPLOY_COLLECTOR_PROVIDERS}"
+fi
 log "selected services: $(selected_unit_templates | tr '\n' ' ')"
 
 [[ "${INSTALL_DIR}" == /* ]] || die "INSTALL_DIR must be an absolute path (got: ${INSTALL_DIR})"
