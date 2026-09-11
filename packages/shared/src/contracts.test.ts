@@ -31,6 +31,15 @@ test('仕様 6.1 の observation payload を受理する', () => {
   expect(parsed.success).toBe(true)
 })
 
+test('Grok provider を受理する', () => {
+  const parsed = observationSchema.safeParse({
+    ...validObservation,
+    provider: 'grok',
+    buckets: [{ ...validBucket, bucketId: 'grok:weekly', label: 'Weekly' }]
+  })
+  expect(parsed.success).toBe(true)
+})
+
 test('未知フィールドは互換性のため無視する', () => {
   const parsed = observationSchema.safeParse({
     ...validObservation,
@@ -42,7 +51,7 @@ test('未知フィールドは互換性のため無視する', () => {
   }
 })
 
-test('provider は codex | claude のみ', () => {
+test('provider は codex | claude | grok のみ', () => {
   const parsed = observationSchema.safeParse({
     ...validObservation,
     provider: 'gemini'

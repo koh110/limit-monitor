@@ -1,38 +1,13 @@
 import { expect, test } from 'vite-plus/test'
-import { buildGrokObservation, parseGrokBillingLine } from './grok.js'
+import { buildGrokObservation } from './grok.js'
 
-const OBSERVED_AT = '2026-09-10T07:00:00.000Z'
+const OBSERVED_AT = '2026-09-10T06:00:00.000Z'
 
-test('billing unified log の ctx を抽出する', () => {
-  const line = JSON.stringify({
-    level: 'INFO',
-    event: 'billing: fetched credits config',
-    ctx: {
-      config: {
-        creditUsagePercent: 37.5,
-        currentPeriod: {
-          type: 'USAGE_PERIOD_TYPE_WEEKLY',
-          start: '2026-09-08T00:00:00Z',
-          end: '2026-09-15T00:00:00Z'
-        }
-      }
-    }
-  })
-  expect(parseGrokBillingLine(line)).toMatchObject({
-    config: { creditUsagePercent: 37.5 }
-  })
-})
-
-test('billing event 以外や壊れた JSON は無視する', () => {
-  expect(parseGrokBillingLine('{broken')).toBeNull()
-  expect(parseGrokBillingLine(JSON.stringify({ event: 'other', ctx: {} }))).toBeNull()
-})
-
-test('weekly credits を Grok observation に正規化する', () => {
+test('creditUsagePercent と weekly period を残量率として Observation に変換する', () => {
   const observation = buildGrokObservation({
-    billing: {
+    payload: {
       config: {
-        creditUsagePercent: 37.5,
+        creditUsagePercent: 42.5,
         currentPeriod: {
           type: 'USAGE_PERIOD_TYPE_WEEKLY',
           start: '2026-09-08T00:00:00Z',
@@ -43,14 +18,16 @@ test('weekly credits を Grok observation に正規化する', () => {
     sourceId: 'dev-machine',
     observedAt: OBSERVED_AT
   })
+
   expect(observation).toMatchObject({
     provider: 'grok',
+    sourceId: 'dev-machine',
     buckets: [
       {
-        bucketId: 'grok:credits',
-        label: '7d',
-        usedPercent: 37.5,
-        remainingPercent: 62.5,
+        bucketId: 'grok:weekly',
+        label: 'Weekly',
+        usedPercent: 57.5,
+        remainingPercent: 42.5,
         windowDurationSeconds: 604800,
         resetsAt: '2026-09-15T00:00:00.000Z',
         reached: false
@@ -59,15 +36,59 @@ test('weekly credits を Grok observation に正規化する', () => {
   })
 })
 
-test('usage percent を 0..100 に clamp する', () => {
+test('creditUsagePercent=69 は残り69%として保持する', () => {
   const observation = buildGrokObservation({
-    billing: { config: { creditUsagePercent: 120 } },
+    payload: { config: { creditUsagePercent: 69 } },
     sourceId: 'dev-machine',
     observedAt: OBSERVED_AT
   })
   expect(observation?.buckets[0]).toMatchObject({
-    usedPercent: 100,
-    remainingPercent: 0,
-    reached: true
+    usedPercent: 31,
+    remainingPercent: 69,
+    reached: false
+  })
+})
+test('旧 monthlyLimit/used 応答へ fallback する', () => {
+  const observation = buildGrokObservation({
+    payload: {
+      config: {
+        monthlyLimit: { val: 10000 },
+        used: { val: 2500 },
+        billingPeriodStart: '2026-09-01T00:00:00Z',
+        billingPeriodEnd: '2026-10-01T00:00:00Z'
+      }
+    },
+    sourceId: 'dev-machine',
+    observedAt: OBSERVED_AT
+  })
+
+  expect(observation?.buckets[0]).toMatchObject({
+    bucketId: 'grok:monthly',
+    label: 'Monthly',
+    usedPercent: 25,
+    remainingPercent: 75
+  })
+})
+
+test('利用率が無い応答は送信対象にしない', () => {
+  expect(
+    buildGrokObservation({
+      payload: { config: {} },
+      sourceId: 'dev-machine',
+      observedAt: OBSERVED_AT
+    })
+  ).toBeNull()
+})
+
+test('残量率は 0..100 に clamp する', () => {
+  const observation = buildGrokObservation({
+    payload: { config: { creditUsagePercent: 120 } },
+    sourceId: 'dev-machine',
+    observedAt: OBSERVED_AT
+  })
+  expect(observation?.buckets[0]).toMatchObject({
+    usedPercent: 0,
+    remainingPercent: 100,
+    reached: false
   })
 })

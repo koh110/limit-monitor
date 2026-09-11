@@ -27,10 +27,12 @@ function observation(provider: Provider): Observation {
 
 function stubReaders({
   codexOk,
-  claudeOk
+  claudeOk,
+  grokOk = true
 }: {
   codexOk: boolean
   claudeOk: boolean
+  grokOk?: boolean
 }): ProviderReaders {
   return {
     codex: async () => {
@@ -44,7 +46,9 @@ function stubReaders({
         : { ok: false, reason: 'timeout', detail: 'claude timed out' }
     },
     grok: async () => {
-      return { ok: true, observation: observation('grok') }
+      return grokOk
+        ? { ok: true, observation: observation('grok') }
+        : { ok: false, reason: 'billing_error', detail: 'grok not authenticated' }
     }
   }
 }
@@ -76,13 +80,14 @@ test('fixture reader は codex / claude / grok の観測を作る', async () => 
 
 test('provider 単位で失敗が独立し、他 provider を止めない', async () => {
   const outcomes = await collectObservations({
-    providers: ['codex', 'claude'],
-    readers: stubReaders({ codexOk: false, claudeOk: true }),
+    providers: ['codex', 'grok', 'claude'],
+    readers: stubReaders({ codexOk: false, claudeOk: true, grokOk: false }),
     sourceId: 'dev-machine',
     observedAt: OBSERVED_AT
   })
   expect(outcomes[0]).toMatchObject({ provider: 'codex', ok: false, reason: 'spawn_failed' })
-  expect(outcomes[1]).toMatchObject({ provider: 'claude', ok: true })
+  expect(outcomes[1]).toMatchObject({ provider: 'grok', ok: false, reason: 'billing_error' })
+  expect(outcomes[2]).toMatchObject({ provider: 'claude', ok: true })
 })
 
 test('失敗した provider の Observation は作られない(Hub の古い値を消さない)', async () => {
@@ -121,10 +126,10 @@ test('reader が throw しても outcome として回収する', async () => {
 
 test('指定した provider だけを収集する', async () => {
   const outcomes = await collectObservations({
-    providers: ['claude'],
+    providers: ['grok'],
     readers: stubReaders({ codexOk: true, claudeOk: true }),
     sourceId: 'dev-machine',
     observedAt: OBSERVED_AT
   })
-  expect(outcomes.map((outcome) => outcome.provider)).toEqual(['claude'])
+  expect(outcomes.map((outcome) => outcome.provider)).toEqual(['grok'])
 })

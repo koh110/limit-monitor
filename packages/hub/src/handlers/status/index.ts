@@ -29,7 +29,7 @@ export function createRoute(app: Hono, db: Db) {
           type: 'about:blank',
           title: 'Bad Request',
           status: 400,
-          detail: 'provider must be one of: codex, claude'
+          detail: 'provider must be one of: codex, claude, grok'
         })
       }
       return { provider: parsed.data }
