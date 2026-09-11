@@ -741,7 +741,7 @@ function placeRelease(
 
   try {
     fs.mkdirSync(versionDir, { recursive: false, mode: 0o755 })
-    fs.cpSync(stage, versionDir, { recursive: true, dereference: false, preserveTimestamps: true })
+    copyEntry(stage, versionDir)
     fs.chmodSync(versionDir, 0o755)
     const tempLink = path.join(paths.installDir, '.current.new')
     fs.rmSync(tempLink, { force: true })
