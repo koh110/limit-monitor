@@ -11,6 +11,7 @@
     "format": "vp fmt package.json deploy.ts deploy/*.ts --write && npm run format --workspaces --if-present",
     "format-check": "vp fmt package.json deploy.ts deploy/*.ts --check",
     "tsc": "tsc --build tsconfig.json",
+    "check:deploy": "vp fmt package.json deploy.ts deploy/*.ts --check && vp lint deploy.ts deploy/*.ts && tsc --build tsconfig.json",
     "test": "npm run test --workspaces --if-present",
     "predev:dashboard": "npm run build -w shared",
     "dev:dashboard": "npm run dev -w dashboard",
