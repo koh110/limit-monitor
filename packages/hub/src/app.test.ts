@@ -264,8 +264,8 @@ test('provider 別 status API は対象 provider のみ返す', async () => {
         {
           bucketId: 'grok:credits',
           label: '7d',
-          usedPercent: 31,
-          remainingPercent: 69
+          usedPercent: 69,
+          remainingPercent: 31
         }
       ]
     })
@@ -282,7 +282,7 @@ test('provider 別 status API は対象 provider のみ返す', async () => {
   const grokBody = statusResponseSchema.parse(await grokRes.json())
   expect(grokBody.accounts.length).toBe(1)
   expect(grokBody.accounts[0]?.provider).toBe('grok')
-  expect(grokBody.accounts[0]?.buckets[0]?.remainingPercent).toBe(69)
+  expect(grokBody.accounts[0]?.buckets[0]?.remainingPercent).toBe(31)
   cleanup()
 })
 
