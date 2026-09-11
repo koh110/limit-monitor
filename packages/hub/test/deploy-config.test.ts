@@ -72,8 +72,8 @@ test('Collector env example は source id を持ち account alias を強制し�
 
 test('Dashboard unit / env は静的 server の listen 設定を持つ', () => {
   expect(DASHBOARD_UNIT).toContain('EnvironmentFile=-/etc/limit-monitor/dashboard.env')
-  expect(DASHBOARD_ENV).toContain('DASHBOARD_HOST=')
-  expect(DASHBOARD_ENV).toContain('DASHBOARD_PORT=')
+  expect(DASHBOARD_ENV).toMatch(/^HOST=127\.0\.0\.1$/m)
+  expect(DASHBOARD_ENV).toMatch(/^PORT=8788$/m)
 })
 
 test('systemd unit template は deploy.ts が埋める identity placeholder を持つ', () => {
