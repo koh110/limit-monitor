@@ -7,7 +7,8 @@ on:
     paths:
       - .github/workflows/apply-provider-persistence.yml
       - .github/scripts/persist-deploy-providers.py
-      - .github/scripts/fix-provider-persistence-tests.py
+      - deploy/provider-config.ts
+      - packages/hub/test/provider-config.test.ts
 
 permissions:
   contents: write
@@ -23,7 +24,6 @@ jobs:
         with:
           node-version: 24.x
       - run: python .github/scripts/persist-deploy-providers.py
-      - run: python .github/scripts/fix-provider-persistence-tests.py
       - run: bash -n deploy/deploy.sh
       - run: npm ci
       - run: npm run format -w hub
@@ -37,7 +37,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add deploy/deploy.sh packages/hub/test/deploy-provider-persistence.test.ts
+          git add deploy/deploy.sh deploy/provider-config.ts packages/hub/test/provider-config.test.ts
           git diff --cached --check
           git diff --cached --quiet && exit 0
           git commit -m "fix(deploy): persist provider selection in collector env"
