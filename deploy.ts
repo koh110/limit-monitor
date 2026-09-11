@@ -212,7 +212,10 @@ export function resolveRepoRoot(entryUrl: string): RepoRoot {
     return { ok: false, message: `not a limit-monitor checkout: ${root}/package.json is missing` }
   }
   if (!fs.existsSync(path.join(root, 'deploy', 'systemd'))) {
-    return { ok: false, message: `not a complete limit-monitor checkout: ${root}/deploy/systemd is missing` }
+    return {
+      ok: false,
+      message: `not a complete limit-monitor checkout: ${root}/deploy/systemd is missing`
+    }
   }
   return { ok: true, root }
 }
@@ -262,11 +265,15 @@ function main(argv: readonly string[]): void {
   }
   const hubBaseUrl = process.env.VITE_HUB_BASE_URL ?? ''
   if (hubBaseUrl === '') {
-    fail('VITE_HUB_BASE_URL is required (baked into the dashboard build). Pass --hub-base-url <url>')
+    fail(
+      'VITE_HUB_BASE_URL is required (baked into the dashboard build). Pass --hub-base-url <url>'
+    )
   }
 
   if (parsed.value.dryRun) {
-    process.stdout.write(`${dryRunSummary(parsed.value, process.env.INSTALL_DIR ?? '/var/www/limit-monitor')}\n`)
+    process.stdout.write(
+      `${dryRunSummary(parsed.value, process.env.INSTALL_DIR ?? '/var/www/limit-monitor')}\n`
+    )
     return
   }
 

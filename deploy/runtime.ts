@@ -10,12 +10,7 @@ import {
   renderCollectorProviders,
   renderEnvUpdates
 } from './env.ts'
-import {
-  type CommandRunner,
-  type InstallIdentity,
-  runAsUser,
-  runCommand
-} from './exec.ts'
+import { type CommandRunner, type InstallIdentity, runAsUser, runCommand } from './exec.ts'
 
 export type DeployService = 'server' | 'collector'
 export type DeployProvider = 'codex' | 'claude' | 'grok'
@@ -48,7 +43,8 @@ type PreparedConfig = {
   collectorOneshot: boolean
 }
 
-const NEW_MANAGED_UNIT_MARKER = '# limit-monitor: managed by deploy.ts -- do not edit (edit env instead)'
+const NEW_MANAGED_UNIT_MARKER =
+  '# limit-monitor: managed by deploy.ts -- do not edit (edit env instead)'
 const LEGACY_MANAGED_UNIT_MARKER =
   '# limit-monitor: managed by deploy/deploy.sh -- do not edit (edit env instead)'
 const MANAGED_UNIT_MARKERS = [NEW_MANAGED_UNIT_MARKER, LEGACY_MANAGED_UNIT_MARKER]
@@ -88,7 +84,8 @@ function parseInteger(value: string | undefined, fallback: number, label: string
 
 function resolvePaths(env: NodeJS.ProcessEnv): DeployPaths {
   const installDir = env.INSTALL_DIR ?? '/var/www/limit-monitor'
-  if (!path.isAbsolute(installDir)) deployError(`INSTALL_DIR must be an absolute path (got: ${installDir})`)
+  if (!path.isAbsolute(installDir))
+    deployError(`INSTALL_DIR must be an absolute path (got: ${installDir})`)
   if (installDir === '/') deployError('INSTALL_DIR must not be /')
   return {
     installDir,
@@ -132,7 +129,8 @@ export function resolveInstallIdentity(
   }
 
   const groupEntry = runner('getent', ['group', String(gid)]).stdout.trim()
-  if (groupEntry === '') deployError(`cannot resolve the primary group (gid ${gid}) of install user ${user}`)
+  if (groupEntry === '')
+    deployError(`cannot resolve the primary group (gid ${gid}) of install user ${user}`)
   const groupFields = groupEntry.split(':')
   const group = groupFields[0] ?? ''
   validateUnixName(group, 'install group')
@@ -158,9 +156,10 @@ function validateNodeBinary(): string {
 
 function validateSemver(version: unknown): string {
   if (typeof version !== 'string') deployError('package.json version must be valid semver')
-  const match = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/.exec(
-    version
-  )
+  const match =
+    /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/.exec(
+      version
+    )
   const prerelease = match?.[4]?.split('.') ?? []
   const validPrerelease = prerelease.every(
     (part) => !/^[0-9]+$/.test(part) || !part.startsWith('0') || part === '0'
@@ -236,7 +235,10 @@ function stageRelease(
   for (const [pkg, entries] of Object.entries(PACKAGE_STAGE_ENTRIES)) {
     const packageDir = path.join(stage, 'packages', pkg)
     fs.mkdirSync(packageDir, { recursive: true, mode: 0o755 })
-    copyEntry(path.join(repoRoot, 'packages', pkg, 'package.json'), path.join(packageDir, 'package.json'))
+    copyEntry(
+      path.join(repoRoot, 'packages', pkg, 'package.json'),
+      path.join(packageDir, 'package.json')
+    )
     for (const entry of entries) {
       const source = path.join(repoRoot, 'packages', pkg, entry)
       if (!fs.existsSync(source)) deployError(`missing ${pkg}/${entry}`)
@@ -280,7 +282,11 @@ function readExample(repoRoot: string, name: 'hub' | 'dashboard' | 'collector'):
   return fs.readFileSync(path.join(repoRoot, 'deploy', `${name}.env.example`), 'utf8')
 }
 
-function envSource(dest: string, example: string, installDir: string): { content: string; existing: boolean } {
+function envSource(
+  dest: string,
+  example: string,
+  installDir: string
+): { content: string; existing: boolean } {
   if (fs.existsSync(dest)) {
     const content = readEnvFile(dest)
     assertNoDuplicateEnvKeys(content, dest)
@@ -291,7 +297,11 @@ function envSource(dest: string, example: string, installDir: string): { content
     return { content, existing: true }
   }
   return {
-    content: renderEnvUpdates(example, { INSTALL_DIR: installDir }, `${path.basename(dest)} example`),
+    content: renderEnvUpdates(
+      example,
+      { INSTALL_DIR: installDir },
+      `${path.basename(dest)} example`
+    ),
     existing: false
   }
 }
@@ -365,7 +375,11 @@ function isExecutableAsUser(
   return runAsUser(runner, identity, 'test', ['-x', file], { allowFailure: true }).status === 0
 }
 
-function candidateCliPaths(identity: InstallIdentity, cli: string, env: NodeJS.ProcessEnv): string[] {
+function candidateCliPaths(
+  identity: InstallIdentity,
+  cli: string,
+  env: NodeJS.ProcessEnv
+): string[] {
   const candidates = new Set<string>()
   for (const dir of (env.PATH ?? '').split(path.delimiter)) {
     if (dir !== '') candidates.add(path.join(dir, cli))
@@ -404,7 +418,9 @@ function resolveInitialCli(
   for (const candidate of candidateCliPaths(identity, cli, env)) {
     if (isExecutableAsUser(runner, identity, candidate)) return candidate
   }
-  deployError(`${cli} CLI not found in ${identity.user} environment; set ${key} to an absolute path`)
+  deployError(
+    `${cli} CLI not found in ${identity.user} environment; set ${key} to an absolute path`
+  )
 }
 
 function validateCollectorEnv(
@@ -429,7 +445,9 @@ function validateCollectorEnv(
       const key = provider === 'codex' ? 'CODEX_BIN' : 'CLAUDE_BIN'
       const bin = readEnvValue(content, key) ?? ''
       if (!isExecutableAsUser(runner, identity, bin)) {
-        deployError(`${provider} provider is enabled but ${key} is not an executable absolute path: ${bin}`)
+        deployError(
+          `${provider} provider is enabled but ${key} is not an executable absolute path: ${bin}`
+        )
       }
     }
   }
@@ -527,7 +545,9 @@ function validateStateDir(paths: DeployPaths, identity: InstallIdentity): void {
     deployError(`state path exists but is not a directory: ${paths.stateDir}`)
   }
   if (stat.uid !== identity.uid || stat.gid !== identity.gid) {
-    deployError(`state directory ${paths.stateDir} has unexpected owner; expected ${identity.user}:${identity.group}`)
+    deployError(
+      `state directory ${paths.stateDir} has unexpected owner; expected ${identity.user}:${identity.group}`
+    )
   }
   if ((stat.mode & 0o777) !== 0o755) {
     deployError(`state directory ${paths.stateDir} must have mode 755`)
@@ -538,10 +558,12 @@ function validateCollectorToken(paths: DeployPaths): void {
   const token = path.join(paths.etcDir, 'collector-token')
   if (!fs.existsSync(token)) deployError(`missing collector token: ${token}`)
   const stat = fs.lstatSync(token)
-  if (!stat.isFile() || stat.isSymbolicLink()) deployError(`collector token must be a regular file: ${token}`)
+  if (!stat.isFile() || stat.isSymbolicLink())
+    deployError(`collector token must be a regular file: ${token}`)
   if ((stat.mode & 0o777) !== 0o600) deployError(`collector token must have mode 600: ${token}`)
   if (stat.uid !== 0) deployError(`collector token must be owned by root: ${token}`)
-  if (fs.readFileSync(token, 'utf8').trim() === '') deployError(`collector token is empty: ${token}`)
+  if (fs.readFileSync(token, 'utf8').trim() === '')
+    deployError(`collector token is empty: ${token}`)
 }
 
 function prepareConfig(
@@ -593,7 +615,10 @@ function prepareConfig(
 
   const units = new Map<string, string>()
   for (const unitName of selectedUnitNames(request.services)) {
-    const template = fs.readFileSync(path.join(request.repoRoot, 'deploy', 'systemd', unitName), 'utf8')
+    const template = fs.readFileSync(
+      path.join(request.repoRoot, 'deploy', 'systemd', unitName),
+      'utf8'
+    )
     const rendered = renderUnit(template, unitName, nodeBin, identity, collectorOneshot)
     if (unitName === 'limit-monitor-collector.service') {
       const tokenPath = path.join(paths.etcDir, 'collector-token')
@@ -602,7 +627,9 @@ function prepareConfig(
         deployError(`${unitName} must load the collector token through systemd credentials`)
       }
       if (!rendered.includes('Environment=HUB_TOKEN_FILE=%d/hub-token')) {
-        deployError(`${unitName} must expose HUB_TOKEN_FILE through the systemd credential directory`)
+        deployError(
+          `${unitName} must expose HUB_TOKEN_FILE through the systemd credential directory`
+        )
       }
     }
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'limit-monitor-unit-'))
@@ -621,7 +648,11 @@ function prepareConfig(
   return { identity, nodeBin, envs, envDestinations, units, collectorOneshot }
 }
 
-function placeStateDir(paths: DeployPaths, identity: InstallIdentity, installServer: boolean): void {
+function placeStateDir(
+  paths: DeployPaths,
+  identity: InstallIdentity,
+  installServer: boolean
+): void {
   fs.mkdirSync(paths.etcDir, { recursive: true, mode: 0o755 })
   if (!installServer) return
   if (!fs.existsSync(paths.stateDir)) fs.mkdirSync(paths.stateDir, { recursive: true, mode: 0o755 })
@@ -638,7 +669,11 @@ function placeManagedUnit(file: string, rendered: string): void {
       .filter((line) => !MANAGED_UNIT_MARKERS.includes(line))
       .join('\n')
     if (existingBody === rendered) return
-    const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, '').replace('T', '')
+    const stamp = new Date()
+      .toISOString()
+      .replace(/[-:]/g, '')
+      .replace(/\..+$/, '')
+      .replace('T', '')
     fs.copyFileSync(file, `${file}.bak-${stamp}`)
   }
   atomicWriteTextFile(file, content, 0o644)
@@ -688,7 +723,8 @@ function placeRelease(
   fs.mkdirSync(paths.versionsDir, { recursive: true, mode: 0o755 })
   let backup: string | undefined
   if (fs.existsSync(versionDir)) {
-    if (!force) deployError(`version already exists: ${versionDir} (use --force to replace it explicitly)`)
+    if (!force)
+      deployError(`version already exists: ${versionDir} (use --force to replace it explicitly)`)
     backup = path.join(paths.versionsDir, `.${version}.backup.${process.pid}`)
     if (fs.existsSync(backup)) deployError(`version backup path already exists: ${backup}`)
     fs.renameSync(versionDir, backup)
@@ -743,7 +779,13 @@ function applyUnit(
 
   if (oneshot) {
     const result = runner('systemctl', ['show', unit, '-p', 'Result', '--value']).stdout.trim()
-    const status = runner('systemctl', ['show', unit, '-p', 'ExecMainStatus', '--value']).stdout.trim()
+    const status = runner('systemctl', [
+      'show',
+      unit,
+      '-p',
+      'ExecMainStatus',
+      '--value'
+    ]).stdout.trim()
     if (result !== 'success' || status !== '0') {
       deployError(`oneshot ${unit} failed: Result=${result} ExecMainStatus=${status}`)
     }
@@ -796,7 +838,11 @@ function startServices(
     waitForHubReady(
       runner,
       prepared.envs.hub!,
-      parseInteger(env.LIMIT_MONITOR_HUB_READY_TIMEOUT_SECONDS, 30, 'LIMIT_MONITOR_HUB_READY_TIMEOUT_SECONDS'),
+      parseInteger(
+        env.LIMIT_MONITOR_HUB_READY_TIMEOUT_SECONDS,
+        30,
+        'LIMIT_MONITOR_HUB_READY_TIMEOUT_SECONDS'
+      ),
       log
     )
     applyUnit(runner, 'limit-monitor-dashboard.service', false, log)
@@ -818,7 +864,9 @@ export function performDeployment(request: DeploymentRequest): void {
   }
   if (process.getuid?.() !== 0) deployError('systemd operations require root (run with sudo)')
 
-  const packageJson = JSON.parse(fs.readFileSync(path.join(request.repoRoot, 'package.json'), 'utf8')) as {
+  const packageJson = JSON.parse(
+    fs.readFileSync(path.join(request.repoRoot, 'package.json'), 'utf8')
+  ) as {
     version?: unknown
   }
   const version = validateSemver(packageJson.version)
