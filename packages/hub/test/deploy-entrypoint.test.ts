@@ -1,9 +1,11 @@
 import { spawnSync } from 'node:child_process'
+import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { expect, test } from 'vite-plus/test'
 import { dryRunSummary, parseArgs } from '../../../deploy.ts'
 import { type CommandRunner } from '../../../deploy/exec.ts'
-import { resolveInstallIdentity } from '../../../deploy/runtime.ts'
+import { copyEntry, resolveInstallIdentity } from '../../../deploy/runtime.ts'
 
 const REPO_ROOT = path.resolve(import.meta.dirname, '../../..')
 const DEPLOY_TS = path.join(REPO_ROOT, 'deploy.ts')
@@ -147,6 +149,24 @@ test('deploy.ts: VITE_HUB_BASE_URL 未設定は dry-run より前に fail-closed
   expect(res.code).not.toBe(0)
   expect(res.err).toContain('VITE_HUB_BASE_URL is required')
   expect(res.out).toBe('')
+})
+
+test('release staging は workspace dependency の symlink を一時dir外へ持ち出さない', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'limit-monitor-copy-test-'))
+  const source = path.join(root, 'source')
+  const target = path.join(root, 'target')
+  const packageDir = path.join(source, 'packages', 'shared')
+  fs.mkdirSync(packageDir, { recursive: true })
+  fs.writeFileSync(path.join(packageDir, 'package.json'), '{"name":"shared"}\\n')
+  fs.mkdirSync(path.join(source, 'node_modules'), { recursive: true })
+  fs.symlinkSync('../packages/shared', path.join(source, 'node_modules', 'shared'))
+
+  copyEntry(source, target)
+
+  const stagedDependency = path.join(target, 'node_modules', 'shared')
+  expect(fs.lstatSync(stagedDependency).isSymbolicLink()).toBe(false)
+  expect(fs.readFileSync(path.join(stagedDependency, 'package.json'), 'utf8')).toContain('"shared"')
+  fs.rmSync(root, { recursive: true, force: true })
 })
 
 test('deploy.ts: dry-run は秘密値を出力しない', () => {

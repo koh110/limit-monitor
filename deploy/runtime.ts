@@ -198,15 +198,24 @@ function runBuild(
   }
 }
 
-function copyEntry(source: string, dest: string): void {
+/** releaseへコピーする際、workspace依存のsymlinkをrelease内の実体にする。 */
+export function copyEntry(source: string, dest: string): void {
   const stat = fs.lstatSync(source)
-  if (stat.isDirectory()) {
-    fs.cpSync(source, dest, { recursive: true, dereference: false, preserveTimestamps: true })
-  } else {
-    fs.mkdirSync(path.dirname(dest), { recursive: true, mode: 0o755 })
-    fs.copyFileSync(source, dest)
-    fs.chmodSync(dest, stat.mode & 0o7777)
+  if (stat.isSymbolicLink()) {
+    copyEntry(fs.realpathSync(source), dest)
+    return
   }
+  if (stat.isDirectory()) {
+    fs.mkdirSync(dest, { recursive: true, mode: stat.mode & 0o7777 })
+    for (const child of fs.readdirSync(source)) {
+      copyEntry(path.join(source, child), path.join(dest, child))
+    }
+    fs.chmodSync(dest, stat.mode & 0o7777)
+    return
+  }
+  fs.mkdirSync(path.dirname(dest), { recursive: true, mode: 0o755 })
+  fs.copyFileSync(source, dest)
+  fs.chmodSync(dest, stat.mode & 0o7777)
 }
 
 function chownTree(root: string, uid: number, gid: number): void {
