@@ -2,6 +2,8 @@
 
 Codex CLI / Claude Code / Grok Build の利用上限を収集し、Hub APIとWeb Dashboardで確認するNode.jsアプリケーションです。
 
+![Limit Monitor Dashboard](docs/assets/dashboard.png)
+
 ## 構成
 
 ```text
