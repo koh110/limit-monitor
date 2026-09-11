@@ -1,92 +1,123 @@
 import type { Observation } from 'shared/src/contracts'
 import { calcRemainingPercent } from 'shared/src/remaining'
 
+export type GrokUsagePeriod = {
+  type?: string | null
+  start?: string | null
+  end?: string | null
+}
+
+export type GrokCent = {
+  val?: number | null
+}
+
 export type GrokBillingConfig = {
   creditUsagePercent?: number | null
-  currentPeriod?: {
-    type?: string | null
-    start?: string | null
-    end?: string | null
-  } | null
+  currentPeriod?: GrokUsagePeriod | null
+  monthlyLimit?: GrokCent | null
+  used?: GrokCent | null
   billingPeriodStart?: string | null
   billingPeriodEnd?: string | null
 }
 
-export type GrokBillingContext = {
+export type GrokBillingResponse = {
   config?: GrokBillingConfig | null
 }
 
-type GrokUnifiedLogLine = {
-  ctx?: GrokBillingContext | null
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-const BILLING_MESSAGE = 'billing: fetched credits config'
+function finiteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
 
 function clampPercent(value: number): number {
   return Math.min(100, Math.max(0, value))
 }
 
-function validIso(value: unknown): string | null {
+function normalizeIso(value: unknown): string | null {
   if (typeof value !== 'string' || value.length === 0) {
     return null
   }
-  const ms = Date.parse(value)
-  return Number.isFinite(ms) ? new Date(ms).toISOString() : null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date.toISOString()
 }
 
-function periodLabel(type: string | null | undefined): string {
-  if (type?.includes('WEEKLY')) {
-    return '7d'
+function readLegacyPercent(config: Record<string, unknown>): number | null {
+  const limit = isRecord(config.monthlyLimit) ? finiteNumber(config.monthlyLimit.val) : null
+  const used = isRecord(config.used) ? finiteNumber(config.used.val) : null
+  if (limit === null || used === null || limit === 0) {
+    return null
   }
-  if (type?.includes('MONTHLY')) {
-    return 'monthly'
-  }
-  return 'usage'
+  return clampPercent((Math.abs(used) / Math.abs(limit)) * 100)
 }
 
-export function parseGrokBillingLine(line: string): GrokBillingContext | null {
-  // unified logger の message field 名に依存せず、billing event の識別文字列と
-  // 構造化 ctx の両方を確認する。ログ format の周辺 metadata 変更に耐えるため。
-  if (!line.includes(BILLING_MESSAGE)) {
-    return null
+function periodInfo(config: Record<string, unknown>): {
+  id: string
+  label: string
+  resetsAt: string | null
+  windowDurationSeconds: number | null
+} {
+  const currentPeriod = isRecord(config.currentPeriod) ? config.currentPeriod : null
+  const periodType =
+    currentPeriod && typeof currentPeriod.type === 'string' ? currentPeriod.type : null
+  const start = normalizeIso(currentPeriod?.start ?? config.billingPeriodStart)
+  const end = normalizeIso(currentPeriod?.end ?? config.billingPeriodEnd)
+
+  let id = 'usage'
+  let label = 'Usage'
+  if (periodType?.includes('WEEKLY')) {
+    id = 'weekly'
+    label = 'Weekly'
+  } else if (periodType?.includes('MONTHLY') || (!currentPeriod && end)) {
+    id = 'monthly'
+    label = 'Monthly'
   }
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(line)
-  } catch {
-    return null
+
+  let windowDurationSeconds: number | null = null
+  if (start && end) {
+    const durationMs = new Date(end).getTime() - new Date(start).getTime()
+    if (durationMs > 0) {
+      windowDurationSeconds = Math.floor(durationMs / 1000)
+    }
   }
-  if (parsed == null || typeof parsed !== 'object') {
-    return null
-  }
-  const value = parsed as GrokUnifiedLogLine
-  if (value.ctx == null || typeof value.ctx !== 'object') {
-    return null
-  }
-  return value.ctx
+
+  return { id, label, resetsAt: end, windowDurationSeconds }
 }
 
-/** Grok Build の billing credits config を共通 Observation に正規化する。 */
+/**
+ * Grok Build ACP の `x.ai/billing` 応答を正規化 Observation へ変換する。
+ * 現行の `creditUsagePercent` を優先し、旧 CLI の monthlyLimit/used にも fallback する。
+ */
 export function buildGrokObservation({
-  billing,
+  payload,
   sourceId,
   observedAt
 }: {
-  billing: GrokBillingContext
+  payload: unknown
   sourceId: string
   observedAt: string
 }): Observation | null {
-  const config = billing.config
-  if (config == null || typeof config.creditUsagePercent !== 'number') {
+  if (!isRecord(payload) || !isRecord(payload.config)) {
     return null
   }
+  const config = payload.config
+  const currentPercent = finiteNumber(config.creditUsagePercent)
+  const legacyUsedPercent = readLegacyPercent(config)
+  let usedPercent: number
+  if (currentPercent === null) {
+    if (legacyUsedPercent === null) {
+      return null
+    }
+    usedPercent = legacyUsedPercent
+  } else {
+    // 現行ACPのcreditUsagePercentはGrok UIの残量率として返る。
+    usedPercent = calcRemainingPercent(clampPercent(currentPercent))
+  }
+  const remainingPercent = calcRemainingPercent(usedPercent)
 
-  const usedPercent = clampPercent(config.creditUsagePercent)
-  const start = validIso(config.currentPeriod?.start ?? config.billingPeriodStart)
-  const end = validIso(config.currentPeriod?.end ?? config.billingPeriodEnd)
-  const durationSeconds =
-    start && end ? Math.max(1, Math.round((Date.parse(end) - Date.parse(start)) / 1000)) : null
-
+  const period = periodInfo(config)
   return {
     schemaVersion: 1,
     provider: 'grok',
@@ -94,12 +125,12 @@ export function buildGrokObservation({
     observedAt,
     buckets: [
       {
-        bucketId: 'grok:credits',
-        label: periodLabel(config.currentPeriod?.type),
+        bucketId: `grok:${period.id}`,
+        label: period.label,
         usedPercent,
-        remainingPercent: calcRemainingPercent(usedPercent),
-        windowDurationSeconds: durationSeconds,
-        resetsAt: end,
+        remainingPercent,
+        windowDurationSeconds: period.windowDurationSeconds,
+        resetsAt: period.resetsAt,
         reached: usedPercent >= 100
       }
     ]

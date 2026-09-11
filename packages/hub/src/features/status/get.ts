@@ -33,7 +33,8 @@ export async function getStatus({
     if (!account) {
       account = {
         // DB の provider 列は ingest 時に契約で検証済み
-        provider: row.provider === 'claude' ? 'claude' : 'codex',
+        provider:
+          row.provider === 'claude' ? 'claude' : row.provider === 'grok' ? 'grok' : 'codex',
         accountAlias: row.accountAlias,
         buckets: []
       }

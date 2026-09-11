@@ -26,7 +26,8 @@ test('未知の COLLECTOR_MODE は起動時に落とす(黙って real/mock に�
 test('provider 一覧を解決し重複を畳む', () => {
   expect(resolveProviders(undefined)).toEqual(['codex', 'claude'])
   expect(resolveProviders('claude')).toEqual(['claude'])
-  expect(resolveProviders(' codex , claude ')).toEqual(['codex', 'claude'])
+  expect(resolveProviders('grok')).toEqual(['grok'])
+  expect(resolveProviders(' codex , claude , grok ')).toEqual(['codex', 'claude', 'grok'])
   expect(resolveProviders('codex,codex')).toEqual(['codex'])
 })
 

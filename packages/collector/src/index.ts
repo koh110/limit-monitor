@@ -7,7 +7,7 @@ import {
   COLLECTOR_MODE,
   COLLECTOR_VERSION,
   COMMAND_TIMEOUT_MS,
-  GROK_LOG_FILE,
+  GROK_BIN,
   HUB_TOKEN,
   HUB_TOKEN_FILE,
   HUB_URL,
@@ -36,7 +36,7 @@ function readToken(): string {
   throw new Error('HUB_TOKEN or HUB_TOKEN_FILE is required')
 }
 
-/** real mode の reader。手元にインストールされた各 CLI / ローカル usage log から実値を取得する */
+/** real mode の reader。手元にインストールされた各 CLI から実値を取得する */
 function createRealReaders(): ProviderReaders {
   return {
     codex: createCodexReader({
@@ -51,8 +51,9 @@ function createRealReaders(): ProviderReaders {
       maxStdoutBytes: MAX_STDOUT_BYTES
     }),
     grok: createGrokReader({
-      logFile: GROK_LOG_FILE,
-      maxReadBytes: MAX_STDOUT_BYTES
+      command: GROK_BIN,
+      timeoutMs: COMMAND_TIMEOUT_MS,
+      maxStdoutBytes: MAX_STDOUT_BYTES
     })
   }
 }

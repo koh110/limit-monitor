@@ -5,6 +5,7 @@ import { buildGrokObservation } from './adapters/grok.js'
 import type { CollectorMode } from './config.js'
 import { createClaudeFixture } from './fixtures/claude.js'
 import { createCodexFixture } from './fixtures/codex.js'
+import { createGrokFixture } from './fixtures/grok.js'
 import type { ProviderReadResult, ProviderReader } from './sources/types.js'
 
 export type ProviderOutcome = { provider: Provider } & ProviderReadResult
@@ -38,21 +39,8 @@ export function createFixtureReaders(): ProviderReaders {
         : { ok: false, reason: 'no_rate_limits', detail: 'claude fixture produced no bucket' }
     },
     grok: async ({ sourceId, observedAt }) => {
-      const start = new Date(observedAt)
-      start.setUTCDate(start.getUTCDate() - 2)
-      const end = new Date(start)
-      end.setUTCDate(end.getUTCDate() + 7)
       const observation = buildGrokObservation({
-        billing: {
-          config: {
-            creditUsagePercent: 42,
-            currentPeriod: {
-              type: 'USAGE_PERIOD_TYPE_WEEKLY',
-              start: start.toISOString(),
-              end: end.toISOString()
-            }
-          }
-        },
+        payload: createGrokFixture(new Date(observedAt)),
         sourceId,
         observedAt
       })

@@ -255,12 +255,34 @@ test('provider 別 status API は対象 provider のみ返す', async () => {
       ]
     })
   })
+  await postObservation({
+    app,
+    token: issued.token,
+    payload: createPayload({
+      provider: 'grok',
+      buckets: [
+        {
+          bucketId: 'grok:credits',
+          label: '7d',
+          usedPercent: 31,
+          remainingPercent: 69
+        }
+      ]
+    })
+  })
 
   const res = await app.request('/api/v1/status/claude')
   expect(res.status).toBe(200)
   const body = statusResponseSchema.parse(await res.json())
   expect(body.accounts.length).toBe(1)
   expect(body.accounts[0]?.provider).toBe('claude')
+
+  const grokRes = await app.request('/api/v1/status/grok')
+  expect(grokRes.status).toBe(200)
+  const grokBody = statusResponseSchema.parse(await grokRes.json())
+  expect(grokBody.accounts.length).toBe(1)
+  expect(grokBody.accounts[0]?.provider).toBe('grok')
+  expect(grokBody.accounts[0]?.buckets[0]?.remainingPercent).toBe(69)
   cleanup()
 })
 
