@@ -10,7 +10,10 @@
   "exclude": ["dist", "node_modules"],
   "compilerOptions": {
     "noEmit": true,
-    "types": ["node"]
+    "types": ["node"],
+    "rootDir": "../..",
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true
   },
   "references": [
     {
