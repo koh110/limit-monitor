@@ -81,13 +81,9 @@ export function runAsUser(
     LOGNAME: identity.user,
     SHELL: identity.shell
   }
-  const envArgs = Object.entries(env)
-    .filter((entry): entry is [string, string] => typeof entry[1] === 'string')
-    .map(([key, value]) => `${key}=${value}`)
 
-  return runner(
-    'runuser',
-    ['-u', identity.user, '--', 'env', ...envArgs, command, ...args],
-    { ...options, env: process.env }
-  )
+  return runner('runuser', ['-u', identity.user, '--', command, ...args], {
+    ...options,
+    env
+  })
 }
