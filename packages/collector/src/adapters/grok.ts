@@ -112,8 +112,8 @@ export function buildGrokObservation({
     }
     usedPercent = legacyUsedPercent
   } else {
-    // 現行ACPのcreditUsagePercentはGrok UIの残量率として返る。
-    usedPercent = calcRemainingPercent(clampPercent(currentPercent))
+    // 現行ACPのcreditUsagePercentはGrok UIの使用済み率として返る。
+    usedPercent = clampPercent(currentPercent)
   }
   const remainingPercent = calcRemainingPercent(usedPercent)
 

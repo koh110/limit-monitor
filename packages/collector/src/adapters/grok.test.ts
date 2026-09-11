@@ -3,7 +3,7 @@ import { buildGrokObservation } from './grok.js'
 
 const OBSERVED_AT = '2026-09-10T06:00:00.000Z'
 
-test('creditUsagePercent と weekly period を残量率として Observation に変換する', () => {
+test('creditUsagePercent と weekly period を使用率として Observation に変換する', () => {
   const observation = buildGrokObservation({
     payload: {
       config: {
@@ -26,8 +26,8 @@ test('creditUsagePercent と weekly period を残量率として Observation に
       {
         bucketId: 'grok:weekly',
         label: 'Weekly',
-        usedPercent: 57.5,
-        remainingPercent: 42.5,
+        usedPercent: 42.5,
+        remainingPercent: 57.5,
         windowDurationSeconds: 604800,
         resetsAt: '2026-09-15T00:00:00.000Z',
         reached: false
@@ -36,15 +36,15 @@ test('creditUsagePercent と weekly period を残量率として Observation に
   })
 })
 
-test('creditUsagePercent=69 は残り69%として保持する', () => {
+test('creditUsagePercent=69 は使用済み69%・残り31%として保持する', () => {
   const observation = buildGrokObservation({
     payload: { config: { creditUsagePercent: 69 } },
     sourceId: 'dev-machine',
     observedAt: OBSERVED_AT
   })
   expect(observation?.buckets[0]).toMatchObject({
-    usedPercent: 31,
-    remainingPercent: 69,
+    usedPercent: 69,
+    remainingPercent: 31,
     reached: false
   })
 })
@@ -87,8 +87,8 @@ test('残量率は 0..100 に clamp する', () => {
     observedAt: OBSERVED_AT
   })
   expect(observation?.buckets[0]).toMatchObject({
-    usedPercent: 0,
-    remainingPercent: 100,
-    reached: false
+    usedPercent: 100,
+    remainingPercent: 0,
+    reached: true
   })
 })

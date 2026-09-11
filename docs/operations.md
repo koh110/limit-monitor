@@ -9,7 +9,7 @@
 - Collectorで選択するproviderに応じた実行環境
   - Codex: install userでCodex CLIへlogin済み
   - Claude: install userでClaude Codeへlogin済み
-  - Grok: install userから`~/.grok/logs/unified.jsonl`を読めること
+  - Grok: install userでGrok CLIへlogin済みで、ACP billing APIを呼び出せること
 
 正規のdeploy入口はリポジトリrootの`./deploy.ts`です。deploy orchestrationはTypeScriptで行い、`npm`、`systemctl`、`runuser`、`systemd-analyze`等の外部コマンドはshell文字列を組み立てず、引数配列で直接実行します。
 

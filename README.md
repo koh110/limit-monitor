@@ -2,6 +2,8 @@
 
 Codex CLI / Claude Code / Grok Build の利用上限を収集し、Hub APIとWeb Dashboardで確認するNode.jsアプリケーションです。
 
+![Limit Monitor Dashboard](docs/assets/dashboard.png)
+
 ## 構成
 
 ```text
@@ -12,7 +14,7 @@ limit-collector ──▶ limit-hub ──▶ limit-dashboard
                     SQLite       React SPA
 ```
 
-- `limit-collector`: ローカルのCodex / Claude CLI、Grok Buildのbilling logから実値を取得してHubへ送信
+- `limit-collector`: ローカルのCodex / Claude CLI、Grok BuildのACP billing APIから実値を取得してHubへ送信
 - `limit-hub`: 認証、観測値の保存、Dashboard向けAPI
 - `limit-dashboard`: Hub APIを表示するWeb Dashboard
 
@@ -24,7 +26,7 @@ limit-collector ──▶ limit-hub ──▶ limit-dashboard
 - npm
 - 選択したproviderに応じて Codex CLI / Claude Code / Grok Build
 - Codex / Claudeを選ぶ場合は、Collectorを実行するユーザーで各CLIへlogin済みであること
-- Grokを選ぶ場合は、Collectorを実行するユーザーから`~/.grok/logs/unified.jsonl`を読めること
+- Grokを選ぶ場合は、Collectorを実行するユーザーでGrok CLIへlogin済みであること
 
 ## 開発環境
 
@@ -74,7 +76,7 @@ COLLECTOR_MODE=mock HUB_TOKEN=<token> SOURCE_ID=<source-id> \
 
 以下は**初めてsystemdへ配置する場合の順番**です。`collector-token`を配置する前にdeployすると、token不足で停止します。
 
-1. 使用するproviderを決めます。Codex / Claudeを使う場合はCollectorを実行する通常ユーザーで各CLIへloginします。Grokは同ユーザーのbilling logを利用します。
+1. 使用するproviderを決めます。Codex / Claude / Grokを使う場合はCollectorを実行する通常ユーザーで各CLIへloginします。GrokはACP billing APIを利用します。
 2. state directoryをinstall user所有で作成します。
 3. production DBをmigrationし、Hub tokenを発行します。
 4. 発行されたtokenをroot所有・mode `600`で配置します。
