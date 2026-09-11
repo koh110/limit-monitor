@@ -14,6 +14,6 @@
     "rewriteRelativeImportExtensions": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["deploy.ts", "deploy/**/*.ts", "test/**/*.ts"],
+  "include": ["deploy.ts", "deploy/**/*.ts"],
   "exclude": ["node_modules", "dist", "packages"]
 }
