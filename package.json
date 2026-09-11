@@ -16,7 +16,7 @@
     "predev:dashboard": "npm run build -w shared",
     "dev:dashboard": "npm run dev -w dashboard",
     "predev:hub": "npm run build -w shared",
-    "dev:hub": "node --watch dist/src/index.js"
+    "dev:hub": "npm run dev -w hub"
   },
   "dependencies": {},
   "devDependencies": {
