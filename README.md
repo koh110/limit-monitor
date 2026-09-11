@@ -75,18 +75,12 @@ COLLECTOR_MODE=mock HUB_TOKEN=<token> SOURCE_ID=<source-id> \
 以下は**初めてsystemdへ配置する場合の順番**です。`collector-token`を配置する前にdeployすると、token不足で停止します。
 
 1. 使用するproviderを決めます。Codex / Claudeを使う場合はCollectorを実行する通常ユーザーで各CLIへloginします。Grokは同ユーザーのbilling logを利用します。
-2. checkout rootでbuildを作成します（`sudo npm`は禁止）。
-3. state directoryをinstall user所有で作成します。
-4. production DBをmigrationし、Hub tokenを発行します。
-5. 発行されたtokenをroot所有・mode `600`で配置します。
-6. `sudo ./deploy.ts`を、使用するproviderを`--providers`で指定して実行します。
+2. state directoryをinstall user所有で作成します。
+3. production DBをmigrationし、Hub tokenを発行します。
+4. 発行されたtokenをroot所有・mode `600`で配置します。
+5. `sudo ./deploy.ts`を、使用するproviderを`--providers`で指定して実行します。build / validation / release配置 / systemd反映はTypeScriptのdeploy処理が行います。
 
 ```bash
-# checkout rootで、Collectorを実行する通常ユーザーとして実行
-# buildが未生成または古い場合、deploy時に自動でprepare-buildされる
-# 手動で先にbuildしたい場合だけ、次を実行する:
-# VITE_HUB_BASE_URL=http://127.0.0.1:8787 ./deploy/deploy.sh --prepare-build
-
 # state directory（sudoする前の通常ユーザー名・group名を使う）
 sudo install -d -o "$(id -un)" -g "$(id -gn)" -m 0755 \
   /var/lib/limit-monitor
@@ -108,7 +102,6 @@ sudo install -m 600 /dev/stdin /etc/limit-monitor/collector-token
 # 直接ファイルを配置/編集してもよい
 
 # systemdへ初回配置（Hub + Dashboard + Collector）
-# providerはenvを編集せずdeploy時に選択する
 sudo ./deploy.ts \
   --server --collector \
   --providers codex,claude,grok \
@@ -119,7 +112,7 @@ sudo ./deploy.ts \
 
 ## Deploy
 
-正規の入口はリポジトリrootの`deploy.ts`です。Collectorのproviderは`--providers`で選択し、通常は`collector.env`を編集しません。
+正規の入口はリポジトリrootの`deploy.ts`です。deploy orchestrationはTypeScriptで実装されており、外部コマンドはshell文字列を組み立てずに引数配列で実行します。
 
 ```bash
 # Hub + Dashboard
@@ -144,13 +137,17 @@ sudo ./deploy.ts \
   --hub-base-url http://127.0.0.1:8787
 ```
 
-`--server`はHubとDashboard、`--collector`はCollectorを対象にします。`--providers`は`--collector`と組み合わせ、`codex,claude,grok`から1つ以上をカンマ区切りで指定します。指定値は生成されるsystemd unitで`EnvironmentFile`より後に設定されるため、既存の`/etc/limit-monitor/collector.env`を書き換える必要はありません。`--providers`を省略した場合だけ、後方互換のため`collector.env`の`COLLECTOR_PROVIDERS`を使用します。
+`--server`はHubとDashboard、`--collector`はCollectorを対象にします。`--providers`は`--collector`と組み合わせ、`codex,claude,grok`から1つ以上をカンマ区切りで指定します。
+
+`--providers`を明示した場合は、既存の`/etc/limit-monitor/collector.env`を基準に`COLLECTOR_PROVIDERS`だけを更新したcandidateを作り、そのcandidateを使ってCLI存在確認などのread-only validationをすべて実行します。全validationに成功した後だけ、正規化したprovider一覧を`collector.env`へatomicに永続化します。既存ファイルの他の設定・コメント・mode/ownerは保持します。systemd unitへ一時的な`Environment=COLLECTOR_PROVIDERS=...` overrideは追加しません。
+
+`--providers`を省略した場合、既存の`collector.env`は書き換えず、そこに永続化済みの`COLLECTOR_PROVIDERS`をそのまま利用します。既存envがない初回deployでのみ`deploy/collector.env.example`の既定値を使います。空要素・未知provider・重複provider、`--collector`なしの`--providers`は設定変更前にfail-closedで拒否されます。既存envにactiveな重複keyがある場合も配置前に停止します。
 
 何もサービスを指定しない場合や未知の引数は失敗します。同じ`package.json` versionを再配置する場合は、明示的に`--force`を追加します。
 
 Deployを実行した通常ユーザーが、3サービスのsystemd実行ユーザーになります。専用Linux userやgroupは作成しません。`sudo`経由では`SUDO_USER`とprimary groupを自動解決します。rootへ直接loginして実行する場合は拒否されます。
 
-Codex / Claudeをproviderとして選ぶ場合、同じinstallユーザーで対象CLIへlogin済みである必要があります。Grokだけを選択した場合、Codex / Claude CLIはdeploy時に要求されません。既存のenv、token、手編集されたsystemd unitはdeployで黙って上書きしません。
+Codex / Claudeをproviderとして選ぶ場合、同じinstallユーザーで対象CLIへlogin済みである必要があります。Grokだけを選択した場合、Codex / Claude CLIはdeploy時に要求されません。tokenや手編集された非管理systemd unitはdeployで黙って上書きしません。
 
 初回構築は上の「初回構築」を先に実行してください。既存hostの移行、rollback、CORS、systemd状態確認は[`docs/operations.md`](docs/operations.md)を参照してください。
 

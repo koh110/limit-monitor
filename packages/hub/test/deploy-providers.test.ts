@@ -1,10 +1,10 @@
 import { spawnSync } from 'node:child_process'
 import path from 'node:path'
 import { expect, test } from 'vite-plus/test'
+import { parseArgs } from '../../../deploy.ts'
 
 const REPO_ROOT = path.resolve(import.meta.dirname, '../../..')
 const DEPLOY_TS = path.join(REPO_ROOT, 'deploy.ts')
-const DEPLOY_SH = path.join(REPO_ROOT, 'deploy/deploy.sh')
 const HUB_URL_ENV = { VITE_HUB_BASE_URL: 'http://127.0.0.1:8787' }
 
 function runDeploy(args: readonly string[]) {
@@ -16,20 +16,20 @@ function runDeploy(args: readonly string[]) {
   return { code: result.status ?? 1, out: result.stdout ?? '', err: result.stderr ?? '' }
 }
 
-test('deploy.ts: --providers を collector deploy へ渡す', () => {
+test('deploy.ts: --providers を collector deployment plan へ正規化して渡す', () => {
   const result = runDeploy(['--collector', '--providers', 'codex,claude,grok', '--dry-run'])
 
   expect(result.code, result.err).toBe(0)
-  expect(result.out.trim()).toBe(
-    `bash ${DEPLOY_SH} --install-systemd --services collector --providers codex,claude,grok`
-  )
+  expect(result.out).toContain('services=collector')
+  expect(result.out).toContain('providers=codex,claude,grok')
+  expect(result.out).not.toContain('bash ')
 })
 
 test('deploy.ts: grok 単独も provider として指定できる', () => {
   const result = runDeploy(['--collector', '--providers', 'grok', '--dry-run'])
 
   expect(result.code, result.err).toBe(0)
-  expect(result.out).toContain('--providers grok')
+  expect(result.out).toContain('providers=grok')
 })
 
 test('deploy.ts: --providers は collector を選んだ時だけ受理する', () => {
@@ -46,4 +46,17 @@ test('deploy.ts: provider の未知名・空要素・重複を fail-closed で�
     expect(result.code, providers).not.toBe(0)
     expect(result.out).toBe('')
   }
+})
+
+test('parseArgs: provider の前後空白は除去し入力順を保持する', () => {
+  const parsed = parseArgs(['--collector', '--providers', ' grok , codex '])
+  expect(parsed.ok).toBe(true)
+  if (!parsed.ok) return
+  expect(parsed.value.providers).toEqual(['grok', 'codex'])
+})
+
+test('deploy.ts: --providers 省略時は persisted collector.env を再利用する plan になる', () => {
+  const result = runDeploy(['--collector', '--dry-run'])
+  expect(result.code, result.err).toBe(0)
+  expect(result.out).toContain('providers=<persisted collector.env>')
 })
