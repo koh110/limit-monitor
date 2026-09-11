@@ -413,8 +413,8 @@ function candidateCliPaths(
 function resolveInitialCli(
   runner: CommandRunner,
   identity: InstallIdentity,
-  key: 'CODEX_BIN' | 'CLAUDE_BIN',
-  cli: 'codex' | 'claude',
+  key: 'CODEX_BIN' | 'CLAUDE_BIN' | 'GROK_BIN',
+  cli: 'codex' | 'claude' | 'grok',
   env: NodeJS.ProcessEnv
 ): string {
   const explicit = env[key]
@@ -424,6 +424,10 @@ function resolveInitialCli(
     }
     return explicit
   }
+  const resolved = runAsUser(runner, identity, identity.shell, ['-lc', `command -v -- ${cli}`], {
+    allowFailure: true
+  }).stdout.trim()
+  if (resolved !== '' && isExecutableAsUser(runner, identity, resolved)) return resolved
   for (const candidate of candidateCliPaths(identity, cli, env)) {
     if (isExecutableAsUser(runner, identity, candidate)) return candidate
   }
@@ -450,8 +454,8 @@ function validateCollectorEnv(
   const providers = parseProvidersFromEnv(content, label)
   if (mode === 'real') {
     for (const provider of providers) {
-      if (provider === 'grok') continue
-      const key = provider === 'codex' ? 'CODEX_BIN' : 'CLAUDE_BIN'
+      const key =
+        provider === 'codex' ? 'CODEX_BIN' : provider === 'claude' ? 'CLAUDE_BIN' : 'GROK_BIN'
       const bin = readEnvValue(content, key) ?? ''
       if (!isExecutableAsUser(runner, identity, bin)) {
         deployError(
@@ -476,16 +480,19 @@ function prepareCollectorEnv(
   let content = source.content
   if (selected !== undefined) content = renderCollectorProviders(content, selected)
   const effectiveProviders = parseProvidersFromEnv(content, dest)
+  const updates: Record<string, string> = {}
   if (!source.existing) {
-    const updates: Record<string, string> = {}
     if (effectiveProviders.includes('codex')) {
       updates.CODEX_BIN = resolveInitialCli(runner, identity, 'CODEX_BIN', 'codex', env)
     }
     if (effectiveProviders.includes('claude')) {
       updates.CLAUDE_BIN = resolveInitialCli(runner, identity, 'CLAUDE_BIN', 'claude', env)
     }
-    content = renderEnvUpdates(content, updates, 'collector.env')
   }
+  if (effectiveProviders.includes('grok') && (readEnvValue(content, 'GROK_BIN') ?? '') === '') {
+    updates.GROK_BIN = resolveInitialCli(runner, identity, 'GROK_BIN', 'grok', env)
+  }
+  if (Object.keys(updates).length > 0) content = renderEnvUpdates(content, updates, 'collector.env')
   const validated = validateCollectorEnv(runner, identity, content, dest)
   return { content, existing: source.existing, oneshot: validated.oneshot }
 }
@@ -713,9 +720,10 @@ function placeConfig(
   if (request.services.includes('collector')) {
     const collectorDest = prepared.envDestinations.collector!
     const exists = fs.existsSync(collectorDest)
-    if (!exists || request.providers !== undefined) {
+    const current = exists ? fs.readFileSync(collectorDest, 'utf8') : null
+    if (!exists || request.providers !== undefined || current !== prepared.envs.collector) {
       atomicWriteTextFile(collectorDest, prepared.envs.collector!, 0o640)
-      log(`persisted collector providers in ${collectorDest}`)
+      log(`persisted collector environment in ${collectorDest}`)
     }
   }
 }

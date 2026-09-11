@@ -63,6 +63,7 @@ test('Collector unit は vendor CLI が HOME の login 情報を読める', () =
   expect(directivesOf(COLLECTOR_UNIT)).not.toContain('ProtectHome=true')
   expect(COLLECTOR_ENV).toContain('CODEX_BIN=')
   expect(COLLECTOR_ENV).toContain('CLAUDE_BIN=')
+  expect(COLLECTOR_ENV).toContain('GROK_BIN=')
 })
 
 test('Collector env example は source id を持ち account alias を強制しない', () => {
