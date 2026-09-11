@@ -7,16 +7,16 @@
   ],
   "type": "module",
   "scripts": {
-    "lint": "vp lint deploy.ts deploy test && npm run lint --workspaces --if-present",
-    "format": "vp fmt package.json deploy.ts deploy test --write && npm run format --workspaces --if-present",
-    "format-check": "vp fmt package.json deploy.ts deploy test --check",
+    "lint": "vp lint deploy.ts deploy/provider-config.ts test/provider-config.test.ts && npm run lint --workspaces --if-present",
+    "format": "vp fmt package.json deploy.ts deploy/provider-config.ts test/provider-config.test.ts --write && npm run format --workspaces --if-present",
+    "format-check": "vp fmt package.json deploy.ts deploy/provider-config.ts test/provider-config.test.ts --check",
     "tsc": "tsc --build tsconfig.json",
     "test:deploy": "node --experimental-strip-types --test test/provider-config.test.ts",
     "test": "npm run test:deploy && npm run test --workspaces --if-present",
     "predev:dashboard": "npm run build -w shared",
     "dev:dashboard": "npm run dev -w dashboard",
     "predev:hub": "npm run build -w shared",
-    "dev:hub": "npm run dev -w hub"
+    "dev:hub": "node --watch dist/src/index.js"
   },
   "dependencies": {},
   "devDependencies": {
