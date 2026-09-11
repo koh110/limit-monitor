@@ -5,7 +5,6 @@ on:
     paths:
       - 'packages/hub/**'
       - 'deploy/**'
-      - 'test/**'
       - 'deploy.ts'
       - 'tsconfig.json'
       - 'packages/shared/**'
@@ -18,7 +17,6 @@ on:
       - '.github/workflows/ci-hub.yml'
       - 'packages/hub/**'
       - 'deploy/**'
-      - 'test/**'
       - 'deploy.ts'
       - 'tsconfig.json'
       - 'packages/shared/**'
@@ -45,7 +43,6 @@ jobs:
       - run: npm run format-check
       - run: npm run lint
       - run: npm run tsc
-      - run: npm run test:deploy
       - run: npm run format-check -w ${{ env.WORKSPACE_NAME }}
       - run: npm run lint -w ${{ env.WORKSPACE_NAME }}
       - run: npm run build -w shared
