@@ -6,25 +6,16 @@
  *   sudo ./deploy.ts --hub-base-url <url> --collector --providers codex,claude,grok
  *   sudo ./deploy.ts --hub-base-url <url> --server --collector --providers codex,claude,grok
  *
- * ここは薄い委譲層で、実処理は deploy/deploy.sh が行う。この入口の責務は:
- *   - 対象サービスの選択を明示的に受け取る(未選択 / 未知引数は fail-closed)
- *   - collector の provider 選択を deploy option として受け取る
- *   - 正規化した repository root(realpath)から deploy/deploy.sh を実行する
- *
- * service 実行ユーザーは deploy を実行した通常ユーザーに統一する。専用の
- * Linux user は作らないし前提にもしない。実行ユーザーの指定を利用者へ求めず、
- * deploy.sh が自動解決する: `sudo` 経由なら SUDO_USER、非 root 実行なら
- * 現在のユーザー、root 直接で主体が不明なら fail-closed で停止する。
- *
- * 秘密値は引数で渡さない。token は /etc/limit-monitor/collector-token
- * (root:root mode 600)へ置き、systemd の LoadCredential で注入する。
- * provider 名は秘密値ではないため --providers で明示する。
- * この script は環境変数の値を出力しない(存在有無だけを検査する)。
+ * deploy orchestration は TypeScript で行う。外部コマンドは shell を介さず
+ * child_process.spawnSync(shell=false) で実行し、env / unit / release の操作は
+ * Node.js の fs API を使う。これにより deployment logic を bash の文字列抽出に
+ * 依存せず直接 unit test できる。
  */
-import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { assertNoDuplicateEnvKeys, envAssignments } from './deploy/env.ts'
+import { performDeployment } from './deploy/runtime.ts'
 
 /** --services へ渡す対象。canonical な順序で保持する */
 export type ServiceTarget = 'server' | 'collector'
@@ -38,7 +29,7 @@ export type ParsedArgs = {
   force: boolean
   /** 選択順ではなく server -> collector の canonical 順 */
   services: ServiceTarget[]
-  /** 指定時は deploy 済み collector unit の実効 provider 一覧になる */
+  /** 指定時は collector.env へ永続化する provider 一覧 */
   providers: ProviderTarget[] | undefined
   hubBaseUrl: string | undefined
 }
@@ -57,35 +48,35 @@ export const USAGE = `limit-monitor deploy
   --server           limit-monitor-hub.service と limit-monitor-dashboard.service を対象にする
   --collector        limit-monitor-collector.service を対象にする
   --providers        Collector の provider (comma区切り: codex,claude,grok)。
-                     指定値は systemd unit 側で EnvironmentFile より優先されるため、
-                     /etc/limit-monitor/collector.env の手編集は不要
+                     指定値は全 read-only validation 成功後に
+                     /etc/limit-monitor/collector.env へ atomic に永続化する。
+                     省略時は既存 collector.env を変更せず、その設定を再利用する
   --hub-base-url     Dashboard に埋め込む Hub の URL(sudoの環境保持に依存しない)
   --force            同じ package.json version の既存 version directory を置き換える
-  --dry-run          委譲先コマンドを表示するだけで実行しない
+  --dry-run          副作用なしで deployment plan を表示する
   -h, --help         このヘルプを表示する
 
 --server / --collector のどちらも指定しない場合は何も実行せずに終了する
 (fail-closed)。未知の引数も同様に拒否する。--providers は --collector と
-組み合わせた場合だけ受理する。省略時は既存 collector.env の設定を使う。
+組み合わせた場合だけ受理する。
 
 service 実行ユーザーは deploy を実行した通常ユーザーに統一する。limit-monitor
 専用の Linux user は作らず、実行ユーザーの指定も求めない。sudo 経由なら
-SUDO_USER から自動解決し、root 直接で主体が不明なら停止する。その場合は
-自分の通常アカウントから 'sudo ./deploy.ts ... --hub-base-url <url>' で実行し直すこと。
+SUDO_USER から自動解決し、root 直接で主体が不明なら停止する。
 
-環境変数(deploy/deploy.sh へそのまま渡る。値はここでは出力しない):
+npm / systemctl / runuser / systemd-analyze 等の外部コマンドは shell を介さず
+直接 exec する。npm build/install は root では実行せず SUDO_USER として実行する。
+
+環境変数:
   VITE_HUB_BASE_URL  Dashboardのbuildに焼き込むHub URL(または--hub-base-url)
   INSTALL_DIR        release 配置先(既定 /var/www/limit-monitor)
   KEEP_VERSIONS      残す過去 version 数(既定 5)
+`
 
-より細かい option は deploy/deploy.sh --help を参照する。`
-
-function parseProviderList(raw: string): { ok: true; providers: ProviderTarget[] } | { ok: false; message: string } {
+function parseProviderList(
+  raw: string
+): { ok: true; providers: ProviderTarget[] } | { ok: false; message: string } {
   const parts = raw.split(',')
-  if (parts.length === 0) {
-    return { ok: false, message: '--providers must list at least one provider' }
-  }
-
   const providers: ProviderTarget[] = []
   for (const part of parts) {
     const name = part.trim()
@@ -109,6 +100,9 @@ function parseProviderList(raw: string): { ok: true; providers: ProviderTarget[]
       }
     }
     providers.push(provider)
+  }
+  if (providers.length === 0) {
+    return { ok: false, message: '--providers must list at least one provider' }
   }
   return { ok: true, providers }
 }
@@ -137,21 +131,15 @@ export function parseArgs(argv: readonly string[]): ParseResult {
         dryRun = true
         break
       case '--force':
-        if (force) {
-          return { ok: false, message: '--force is specified more than once' }
-        }
+        if (force) return { ok: false, message: '--force is specified more than once' }
         force = true
         break
       case '--server':
-        if (server) {
-          return { ok: false, message: '--server is specified more than once' }
-        }
+        if (server) return { ok: false, message: '--server is specified more than once' }
         server = true
         break
       case '--collector':
-        if (collector) {
-          return { ok: false, message: '--collector is specified more than once' }
-        }
+        if (collector) return { ok: false, message: '--collector is specified more than once' }
         collector = true
         break
       case '--providers': {
@@ -163,9 +151,7 @@ export function parseArgs(argv: readonly string[]): ParseResult {
           return { ok: false, message: '--providers requires a comma-separated provider list' }
         }
         const parsedProviders = parseProviderList(value)
-        if (!parsedProviders.ok) {
-          return parsedProviders
-        }
+        if (!parsedProviders.ok) return parsedProviders
         providers = parsedProviders.providers
         i += 1
         break
@@ -195,12 +181,8 @@ export function parseArgs(argv: readonly string[]): ParseResult {
   }
 
   const services: ServiceTarget[] = []
-  if (server) {
-    services.push('server')
-  }
-  if (collector) {
-    services.push('collector')
-  }
+  if (server) services.push('server')
+  if (collector) services.push('collector')
   if (services.length === 0) {
     return {
       ok: false,
@@ -217,33 +199,8 @@ export function parseArgs(argv: readonly string[]): ParseResult {
   return { ok: true, value: { help: false, dryRun, force, services, providers, hubBaseUrl } }
 }
 
-/**
- * deploy/deploy.sh へ渡す引数列を組み立てる。秘密値は含めない。
- * service 実行ユーザーは deploy.sh が SUDO_USER / 現在のユーザーから解決するため、
- * identity に関する引数は渡さない(利用者にも指定を求めない)。
- */
-export function buildDeployShArgs(parsed: ParsedArgs): string[] {
-  const args = ['--install-systemd', '--services', parsed.services.join(',')]
-  if (parsed.providers !== undefined) {
-    args.push('--providers', parsed.providers.join(','))
-  }
-  if (parsed.force) {
-    args.push('--force')
-  }
-  if (parsed.hubBaseUrl !== undefined) {
-    args.push('--hub-base-url', parsed.hubBaseUrl)
-  }
-  return args
-}
+export type RepoRoot = { ok: true; root: string } | { ok: false; message: string }
 
-export type RepoRoot = { ok: true; root: string; script: string } | { ok: false; message: string }
-
-/**
- * この script が置かれている場所から正規 repository root を決める。
- * symlink 経由で呼ばれても実体の root で実行するため realpath で正規化し、
- * 期待する構成(deploy/deploy.sh が通常ファイル、package.json が存在)を
- * 満たさなければ何も実行しない(fail-closed)。
- */
 export function resolveRepoRoot(entryUrl: string): RepoRoot {
   let root: string
   try {
@@ -251,29 +208,38 @@ export function resolveRepoRoot(entryUrl: string): RepoRoot {
   } catch (error) {
     return { ok: false, message: `cannot resolve the repository root: ${String(error)}` }
   }
-
-  const script = path.join(root, 'deploy', 'deploy.sh')
-  let scriptIsFile = false
-  try {
-    scriptIsFile = fs.lstatSync(script).isFile()
-  } catch {
-    scriptIsFile = false
-  }
-  if (!scriptIsFile) {
-    return {
-      ok: false,
-      message: `deploy script is missing or is not a regular file: ${script} (run ./deploy.ts from a complete checkout)`
-    }
-  }
   if (!fs.existsSync(path.join(root, 'package.json'))) {
     return { ok: false, message: `not a limit-monitor checkout: ${root}/package.json is missing` }
   }
-  return { ok: true, root, script }
+  if (!fs.existsSync(path.join(root, 'deploy', 'systemd'))) {
+    return { ok: false, message: `not a complete limit-monitor checkout: ${root}/deploy/systemd is missing` }
+  }
+  return { ok: true, root }
+}
+
+function loadDeployEnvDefaults(repoRoot: string): void {
+  const file = path.join(repoRoot, 'deploy', 'deploy.env')
+  if (!fs.existsSync(file)) return
+  const content = fs.readFileSync(file, 'utf8')
+  assertNoDuplicateEnvKeys(content, file)
+  for (const assignment of envAssignments(content)) {
+    if (process.env[assignment.key] === undefined) process.env[assignment.key] = assignment.value
+  }
 }
 
 function fail(message: string): never {
   process.stderr.write(`[deploy.ts] ERROR: ${message}\n`)
   process.exit(1)
+}
+
+export function dryRunSummary(parsed: ParsedArgs, installDir: string): string {
+  return [
+    'deploy.ts plan',
+    `services=${parsed.services.join(',')}`,
+    `providers=${parsed.providers?.join(',') ?? '<persisted collector.env>'}`,
+    `installDir=${installDir}`,
+    `force=${parsed.force ? 'yes' : 'no'}`
+  ].join(' ')
 }
 
 function main(argv: readonly string[]): void {
@@ -288,46 +254,33 @@ function main(argv: readonly string[]): void {
   }
 
   const repo = resolveRepoRoot(import.meta.url)
-  if (!repo.ok) {
-    fail(repo.message)
-  }
+  if (!repo.ok) fail(repo.message)
+  loadDeployEnvDefaults(repo.root)
 
-  // sudo-rsなどが環境全体保持(-E)を無視しても、公開URLは明示引数で渡せる。
   if (parsed.value.hubBaseUrl !== undefined) {
     process.env.VITE_HUB_BASE_URL = parsed.value.hubBaseUrl
   }
-  // 未設定のまま進むと deploy.sh 側で die するため、ここで先に案内する。
-  if ((process.env.VITE_HUB_BASE_URL ?? '') === '') {
-    fail(
-      'VITE_HUB_BASE_URL is required (baked into the dashboard build). Pass --hub-base-url <url>'
-    )
+  const hubBaseUrl = process.env.VITE_HUB_BASE_URL ?? ''
+  if (hubBaseUrl === '') {
+    fail('VITE_HUB_BASE_URL is required (baked into the dashboard build). Pass --hub-base-url <url>')
   }
 
-  const args = buildDeployShArgs(parsed.value)
   if (parsed.value.dryRun) {
-    process.stdout.write(`bash ${repo.script} ${args.join(' ')}\n`)
+    process.stdout.write(`${dryRunSummary(parsed.value, process.env.INSTALL_DIR ?? '/var/www/limit-monitor')}\n`)
     return
   }
 
-  if (process.getuid?.() !== 0) {
-    fail(
-      "systemd install requires root. Re-run as 'sudo ./deploy.ts --hub-base-url <url> " +
-        `${argv.join(' ')}' so SUDO_USER is preserved; pass --hub-base-url explicitly`
-    )
+  try {
+    performDeployment({
+      repoRoot: repo.root,
+      services: parsed.value.services,
+      providers: parsed.value.providers,
+      hubBaseUrl,
+      force: parsed.value.force
+    })
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error))
   }
-
-  const result = spawnSync('bash', [repo.script, ...args], {
-    cwd: repo.root,
-    stdio: 'inherit',
-    env: process.env
-  })
-  if (result.error !== undefined) {
-    fail(`failed to run ${repo.script}: ${result.error.message}`)
-  }
-  if (result.signal !== null) {
-    fail(`${repo.script} was terminated by signal ${result.signal}`)
-  }
-  process.exit(result.status ?? 1)
 }
 
 const entryPath = process.argv[1]
