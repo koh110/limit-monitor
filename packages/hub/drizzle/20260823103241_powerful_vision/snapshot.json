@@ -2,9 +2,7 @@
   "version": "7",
   "dialect": "sqlite",
   "id": "7b2c9e23-ca8e-47cc-bdcc-2002f5d427f0",
-  "prevIds": [
-    "00000000-0000-0000-0000-000000000000"
-  ],
+  "prevIds": [],
   "ddl": [
     {
       "name": "collector_tokens",

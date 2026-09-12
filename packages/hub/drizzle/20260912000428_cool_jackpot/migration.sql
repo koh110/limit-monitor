@@ -1,0 +1,1 @@
+ALTER TABLE `refresh_requests` ADD `lease_id` text;

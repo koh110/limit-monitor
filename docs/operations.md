@@ -153,7 +153,7 @@ unit templateの`User=CHANGE_ME` / `Group=CHANGE_ME`とNode.js pathはdeploy時�
 
 既存unitを更新できるのはdeploy管理markerを持つunitだけです。手編集された非管理unitは黙って上書きせず停止します。管理unit更新時はbackupを作成してからatomicに置き換えます。
 
-Collectorの`COLLECTOR_INTERVAL_SECONDS=0`は`Type=oneshot`、それ以外は`Type=simple`としてrenderします。
+Collectorは常駐Agentとして`Type=simple`でrenderします。定期triggerの間隔はHubの`COLLECTOR_TRIGGER_INTERVAL_SECONDS`で設定し、Collector側にscheduler用のinterval設定は置きません。
 
 ## state directory
 
@@ -202,7 +202,7 @@ unit配置後に`systemctl daemon-reload`し、対象unitをenableして起動/�
 
 Hubは`/readyz`が成功するまで待機してからDashboardを起動します。timeoutは`LIMIT_MONITOR_HUB_READY_TIMEOUT_SECONDS`で変更でき、既定30秒です。
 
-Collector oneshotは`Result=success`かつ`ExecMainStatus=0`を確認します。
+Collectorは常駐Agent（`Type=simple`）として起動し、`is-active=active`を確認します。収集時に起動するWorker subprocessの終了結果はAgentが監視し、manual refreshの状態へ反映します。
 
 ## rollback
 

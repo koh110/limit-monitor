@@ -4,7 +4,14 @@ import { beforeEach, expect, test, vi } from 'vite-plus/test'
  * server/config.ts は環境変数をモジュール読み込み時に評価するため、
  * 各 test で env を変えてから resetModules + 再 import で評価し直す。
  */
-const ENV_KEYS = ['HOST', 'PORT', 'DASHBOARD_PUBLIC_ORIGIN', 'DASHBOARD_DIST_DIR'] as const
+const ENV_KEYS = [
+  'HOST',
+  'PORT',
+  'HUB_URL',
+  'HUB_REFRESH_TOKEN',
+  'DASHBOARD_PUBLIC_ORIGIN',
+  'DASHBOARD_DIST_DIR'
+] as const
 
 function setEnv(env: Record<string, string | undefined>) {
   for (const key of ENV_KEYS) {
@@ -31,6 +38,25 @@ test('既定は localhost bind / port 8788 であり public origin も localhost
   expect(HOST).toBe('127.0.0.1')
   expect(PORT).toBe(8788)
   expect(DASHBOARD_PUBLIC_ORIGIN).toBe('http://127.0.0.1:8788')
+})
+
+test('server-side Hub proxy のURL/tokenはbrowser設定と分離される', async () => {
+  setEnv({ HUB_URL: 'https://hub.example.test', HUB_REFRESH_TOKEN: 'server-only-token' })
+  const { HUB_URL, HUB_REFRESH_TOKEN } = await loadConfig()
+  expect(HUB_URL).toBe('https://hub.example.test')
+  expect(HUB_REFRESH_TOKEN).toBe('server-only-token')
+})
+
+test('Hub URLのcredentials/path/queryは起動時に拒否する', async () => {
+  for (const HUB_URL of [
+    'ftp://hub.example.test',
+    'http://user:pass@hub.example.test',
+    'http://hub.example.test/api',
+    'http://hub.example.test?x=1'
+  ]) {
+    setEnv({ HUB_URL })
+    await expect(loadConfig(), HUB_URL).rejects.toThrow(/HUB_URL must be an origin/)
+  }
 })
 
 test('bind address(HOST)と public origin は分離できる', async () => {

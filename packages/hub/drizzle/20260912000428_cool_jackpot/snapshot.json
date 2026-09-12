@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "c80c90a8-40b6-4614-96ea-e7ab2a6b6b54",
+  "id": "0a02e916-382d-4144-86d4-721703016329",
   "prevIds": [
-    "7b2c9e23-ca8e-47cc-bdcc-2002f5d427f0"
+    "23dd2a2a-c704-4706-bf66-36c10cccddba"
   ],
   "ddl": [
     {
@@ -12,6 +12,10 @@
     },
     {
       "name": "latest_limits",
+      "entityType": "tables"
+    },
+    {
+      "name": "refresh_requests",
       "entityType": "tables"
     },
     {
@@ -185,6 +189,116 @@
       "table": "latest_limits"
     },
     {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "refresh_requests"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "provider",
+      "entityType": "columns",
+      "table": "refresh_requests"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "account_alias",
+      "entityType": "columns",
+      "table": "refresh_requests"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "source_id",
+      "entityType": "columns",
+      "table": "refresh_requests"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "requested_at",
+      "entityType": "columns",
+      "table": "refresh_requests"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "dispatched_at",
+      "entityType": "columns",
+      "table": "refresh_requests"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "lease_id",
+      "entityType": "columns",
+      "table": "refresh_requests"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "started_at",
+      "entityType": "columns",
+      "table": "refresh_requests"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "completed_at",
+      "entityType": "columns",
+      "table": "refresh_requests"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "status",
+      "entityType": "columns",
+      "table": "refresh_requests"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "error_code",
+      "entityType": "columns",
+      "table": "refresh_requests"
+    },
+    {
       "columns": [
         "source_id",
         "account_alias"
@@ -204,6 +318,85 @@
       "name": "latest_limits_pk",
       "entityType": "pks",
       "table": "latest_limits"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "refresh_requests_pk",
+      "table": "refresh_requests",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        {
+          "value": "source_id",
+          "isExpression": false
+        },
+        {
+          "value": "provider",
+          "isExpression": false
+        },
+        {
+          "value": "account_alias",
+          "isExpression": false
+        },
+        {
+          "value": "status",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "refresh_requests_scope_status_idx",
+      "entityType": "indexes",
+      "table": "refresh_requests"
+    },
+    {
+      "columns": [
+        {
+          "value": "status",
+          "isExpression": false
+        },
+        {
+          "value": "dispatched_at",
+          "isExpression": false
+        },
+        {
+          "value": "started_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "refresh_requests_lease_idx",
+      "entityType": "indexes",
+      "table": "refresh_requests"
+    },
+    {
+      "columns": [
+        {
+          "value": "source_id",
+          "isExpression": false
+        },
+        {
+          "value": "provider",
+          "isExpression": false
+        },
+        {
+          "value": "account_alias",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": "\"refresh_requests\".\"status\" in ('queued', 'dispatched', 'running')",
+      "origin": "manual",
+      "name": "refresh_requests_active_scope_idx",
+      "entityType": "indexes",
+      "table": "refresh_requests"
     },
     {
       "columns": [

@@ -94,6 +94,29 @@ export function renderCollectorProviders(content: string, providers: readonly st
   return renderEnvUpdates(content, { COLLECTOR_PROVIDERS: providers.join(',') }, 'collector.env')
 }
 
+export function removeEnvKeys(
+  content: string,
+  keys: readonly string[],
+  label = 'env file'
+): string {
+  assertNoDuplicateEnvKeys(content, label)
+  for (const key of keys) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+      throw new DeployConfigError(`invalid env key: ${key}`)
+    }
+  }
+
+  const remove = new Set(keys)
+  const { lines, trailingNewline } = splitLines(content)
+  const removeIndexes = new Set(
+    envAssignments(content)
+      .filter((assignment) => remove.has(assignment.key))
+      .map((assignment) => assignment.lineIndex)
+  )
+  const rendered = lines.filter((_, index) => !removeIndexes.has(index)).join('\n')
+  return trailingNewline || rendered.length > 0 ? `${rendered}\n` : rendered
+}
+
 export function readEnvFile(file: string): string {
   const stat = fs.lstatSync(file)
   if (!stat.isFile() || stat.isSymbolicLink()) {

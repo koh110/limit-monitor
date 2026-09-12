@@ -31,11 +31,11 @@ limit-monitor/
   packages/
     shared/      # API 契約(TypeSpec → OpenAPI → TS 型)、契約 schema(zod/mini)、
                  # freshness/残量/最新値選択、Drizzle DB schema
-    hub/         # Hono API server。Ingest/Status/health、token 管理 CLI、migration
+    hub/         # Hono API server。Ingest/Status/health/refresh、control WebSocket、
+                 # token 管理 CLI、migration
     client/      # Vite + React + react-router Dashboard(SPA、Hub へ直接 CORS fetch)
-    collector/   # real collector(既定)。Codex/Claude CLI から usage を観測し
-                 # Observation を Hub へ送信。mock(fixture 送信)は
-                 # COLLECTOR_MODE=mock の明示指定時のみ有効
+    collector/   # Agent(WebSocket/reconnect) + one-shot Worker。Worker が
+                 # Codex/Claude CLI から usage を観測し Observation を Hub へ送信
   deploy/systemd/
   docs/
 ```
@@ -64,6 +64,7 @@ packages/shared/
   typespec/health.tsp       # /healthz, /readyz
   typespec/status.tsp       # /api/v1/status, /api/v1/status/{provider}
   typespec/observations.tsp # /api/v1/observations
+  typespec/refresh.tsp      # /api/v1/refresh-requests
   tspconfig.yaml            # openapi3 emitter 設定(OpenAPI 3.1)
   tsp-output/schema/openapi.yaml  # 中間生成物(git 管理しない)
   src/generated/schema.ts   # openapi-typescript の生成型(git 管理しない)
@@ -119,6 +120,9 @@ main.tsp --(tsp compile)--> tsp-output/schema/openapi.yaml
 | GET | `/api/v1/status` | private network 制限 | 全 provider の最新状態 |
 | GET | `/api/v1/status/:provider` | private network 制限 | provider 別状態 |
 | POST | `/api/v1/observations` | Collector Bearer Token | 観測値登録 |
+| POST | `/api/v1/refresh-requests` | `HUB_REFRESH_TOKEN` Bearer | provider + accountAlias 単位の durable refresh 要求 |
+| GET | `/api/v1/refresh-requests/:id` | 不要 | refresh 要求の状態取得 |
+| WebSocket | `/api/v1/collector/control` | Collector Bearer Token | Collector Agent への outbound control / lifecycle 通知 |
 
 エラーレスポンスは RFC 9457 Problem Details 形式。media type は経路によって異なり、
 契約(TypeSpec)側もこの実装の挙動に合わせている。
@@ -177,7 +181,7 @@ Dashboard では Hub 到達不能(`offline`)と `stale` を別表示する。
 - schema は `packages/shared/src/db/schema.ts` を単一ソースとする
 - migration は `drizzle-kit generate` で SQL を生成し、Hub 起動時と
   `npm run db-migrate -w hub` で適用する。`drizzle-kit push` は検証用途のみ
-- MVP のテーブルは `latest_limits` と `collector_tokens` のみ(履歴保存なし)
+- MVP のテーブルは `latest_limits`、`collector_tokens`、`refresh_requests`（scope 単位で active request を coalesce し、terminal status は保持する。queued request は 24 時間で自動 purge）
 - WAL mode。DB ファイルは永続 volume に置き、再起動後も最新値が残る
 
 ## Dashboard(packages/client)
@@ -189,3 +193,6 @@ Dashboard では Hub 到達不能(`offline`)と `stale` を別表示する。
 - 色: 残量 50%以上=緑、20%以上50%未満=黄、20%未満=赤、stale/expired=グレー、
   取得不能=ダークグレー
 - 60 秒間隔の自動再取得と、バックグラウンド復帰(visibilitychange)時の再取得
+- 各 provider + accountAlias カードの更新ボタンは Hub の durable refresh request API を使う。
+  Hub は collector の outbound control WebSocketへ配送し、Dashboard は最大 5 分間 request status を
+  500ms 間隔で polling する。completed 後に status を再取得し、failed / timeout は明示表示する。

@@ -8,7 +8,8 @@ import {
   duplicateEnvKeys,
   readEnvValue,
   renderCollectorProviders,
-  renderEnvUpdates
+  renderEnvUpdates,
+  removeEnvKeys
 } from '../../../deploy/env.ts'
 
 test('renderCollectorProviders は provider だけを更新して他の設定とコメントを保持する', () => {
@@ -104,4 +105,25 @@ test('atomicWriteTextFile は symlink を上書きしない', () => {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('removeEnvKeys は obsolete key だけを除去し、他の設定とコメントを保持する', () => {
+  const source = [
+    '# collector settings',
+    'COLLECTOR_MODE=real',
+    'COLLECTOR_INTERVAL_SECONDS=60',
+    'SOURCE_ID=existing-host',
+    'COLLECTOR_PROVIDERS=codex,claude',
+    ''
+  ].join('\n')
+
+  expect(removeEnvKeys(source, ['COLLECTOR_INTERVAL_SECONDS'], 'collector.env')).toBe(
+    [
+      '# collector settings',
+      'COLLECTOR_MODE=real',
+      'SOURCE_ID=existing-host',
+      'COLLECTOR_PROVIDERS=codex,claude',
+      ''
+    ].join('\n')
+  )
 })

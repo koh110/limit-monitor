@@ -32,48 +32,17 @@ const failed: ProviderOutcome = {
 }
 
 test('provider が 1 つも無ければ設定不備として失敗させる', () => {
-  expect(judgeStartupCycle({ outcomes: [], isOneshot: true })).toEqual({
-    exitCode: 1,
-    continueRunning: false
-  })
-  expect(judgeStartupCycle({ outcomes: [], isOneshot: false })).toEqual({
-    exitCode: 1,
-    continueRunning: false
-  })
+  expect(judgeStartupCycle({ outcomes: [] })).toEqual({ exitCode: 1 })
 })
 
-test('全 provider 失敗は常駐でも起動失敗にする(無条件の成功扱いをしない)', () => {
-  expect(judgeStartupCycle({ outcomes: [failed], isOneshot: false })).toEqual({
-    exitCode: 1,
-    continueRunning: false
-  })
-  expect(judgeStartupCycle({ outcomes: [failed], isOneshot: true })).toEqual({
-    exitCode: 1,
-    continueRunning: false
-  })
+test('全 provider 失敗は非 0 終了にする', () => {
+  expect(judgeStartupCycle({ outcomes: [failed] })).toEqual({ exitCode: 1 })
 })
 
-test('oneshot で一部失敗なら非 0 終了にする', () => {
-  expect(judgeStartupCycle({ outcomes: [ok, failed], isOneshot: true })).toEqual({
-    exitCode: 1,
-    continueRunning: false
-  })
+test('一部 provider の失敗も非 0 終了にする', () => {
+  expect(judgeStartupCycle({ outcomes: [ok, failed] })).toEqual({ exitCode: 1 })
 })
 
-test('常駐で一部失敗なら常駐は継続する(一時障害で落とさない)', () => {
-  expect(judgeStartupCycle({ outcomes: [ok, failed], isOneshot: false })).toEqual({
-    exitCode: 0,
-    continueRunning: true
-  })
-})
-
-test('全て成功なら oneshot は終了し常駐は継続する', () => {
-  expect(judgeStartupCycle({ outcomes: [ok], isOneshot: true })).toEqual({
-    exitCode: 0,
-    continueRunning: false
-  })
-  expect(judgeStartupCycle({ outcomes: [ok], isOneshot: false })).toEqual({
-    exitCode: 0,
-    continueRunning: true
-  })
+test('全て成功なら 0 終了にする', () => {
+  expect(judgeStartupCycle({ outcomes: [ok] })).toEqual({ exitCode: 0 })
 })
