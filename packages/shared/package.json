@@ -15,6 +15,10 @@
       "types": "./dist/src/contracts.d.ts",
       "default": "./dist/src/contracts.js"
     },
+    "./src/control": {
+      "types": "./dist/src/control.d.ts",
+      "default": "./dist/src/control.js"
+    },
     "./src/schema": {
       "types": "./dist/src/schema.d.ts",
       "default": "./dist/src/schema.js"

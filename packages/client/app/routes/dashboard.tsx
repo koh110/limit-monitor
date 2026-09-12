@@ -44,6 +44,7 @@ export default function Dashboard({ loaderData: result }: Route.ComponentProps) 
                   key={`${account.provider}:${account.accountAlias}`}
                   account={account}
                   now={now}
+                  onRefresh={revalidate}
                 />
               )
             })}

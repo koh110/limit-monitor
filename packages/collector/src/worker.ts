@@ -11,13 +11,12 @@ import {
   HUB_TOKEN,
   HUB_TOKEN_FILE,
   HUB_URL,
-  INTERVAL_SECONDS,
   MAX_STDOUT_BYTES,
   PROVIDERS,
+  resolveProviders,
   SEND_TIMEOUT_MS,
   SOURCE_ID
 } from './config.js'
-import { createCycleLoop } from './loop.js'
 import { logger } from './lib/logger.js'
 import { judgeStartupCycle } from './outcome.js'
 import { sendObservation } from './send.js'
@@ -64,9 +63,19 @@ function createRealReaders(): ProviderReaders {
  */
 async function collectAndSend(token: string): Promise<ProviderOutcome[]> {
   const observedAt = new Date().toISOString()
+  const requestedProvider = process.argv
+    .find((arg) => arg.startsWith('--provider='))
+    ?.slice('--provider='.length)
+  const providers = requestedProvider ? resolveProviders(requestedProvider) : PROVIDERS
+  if (requestedProvider) {
+    const requested = providers[0]
+    if (!requested || providers.length !== 1 || !PROVIDERS.includes(requested)) {
+      throw new Error('requested provider is not configured locally')
+    }
+  }
   const readers = selectReaders({ mode: COLLECTOR_MODE, realReaders: createRealReaders() })
   const collected = await collectObservations({
-    providers: PROVIDERS,
+    providers,
     readers,
     sourceId: SOURCE_ID,
     observedAt
@@ -121,20 +130,31 @@ async function collectAndSend(token: string): Promise<ProviderOutcome[]> {
 
 async function main() {
   const token = readToken()
+  const reason = process.argv.find((arg) => arg.startsWith('--reason='))?.slice('--reason='.length)
+  if (reason !== undefined && reason !== 'periodic' && reason !== 'manual') {
+    throw new Error('worker reason must be periodic or manual')
+  }
+  const requestedProvider = process.argv
+    .find((arg) => arg.startsWith('--provider='))
+    ?.slice('--provider='.length)
+  if (reason === 'manual' && !requestedProvider) {
+    throw new Error('manual worker requires --provider')
+  }
+  if (reason === 'periodic' && requestedProvider) {
+    throw new Error('periodic worker cannot select a provider')
+  }
   logger.log({
     label: 'collector started',
     body: `collector sending to ${HUB_URL}`,
     meta: {
       mode: COLLECTOR_MODE,
       sourceId: SOURCE_ID,
-      providers: PROVIDERS,
-      intervalSeconds: INTERVAL_SECONDS
+      providers: PROVIDERS
     }
   })
 
-  const isOneshot = INTERVAL_SECONDS === 0
   const outcomes = await collectAndSend(token)
-  const verdict = judgeStartupCycle({ outcomes, isOneshot })
+  const verdict = judgeStartupCycle({ outcomes })
   if (verdict.exitCode !== 0) {
     process.exitCode = verdict.exitCode
     const failed = outcomes
@@ -150,26 +170,6 @@ async function main() {
       meta: { mode: COLLECTOR_MODE, failed, total: outcomes.length }
     })
   }
-  if (!verdict.continueRunning) {
-    return
-  }
-
-  // 非重複 loop: 前 cycle 完了後に次 cycle を schedule する。
-  // setInterval のように実行が interval を超えても重ねて起動しない。
-  const loop = createCycleLoop({
-    intervalMs: INTERVAL_SECONDS * 1000,
-    runCycle: async () => {
-      await collectAndSend(token).catch((error: unknown) => {
-        logger.error({ label: 'collect failed', body: 'unexpected', error })
-      })
-    }
-  })
-  process.on('SIGTERM', () => {
-    loop.stop()
-  })
-  process.on('SIGINT', () => {
-    loop.stop()
-  })
 }
 
 main().catch((error: unknown) => {

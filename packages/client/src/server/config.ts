@@ -18,6 +18,30 @@ function resolvePort(raw: string | undefined) {
   return value
 }
 
+function resolveHubUrl(raw: string | undefined) {
+  const trimmed = (raw ?? '').trim() || 'http://127.0.0.1:8787'
+  let parsed: URL
+  try {
+    parsed = new URL(trimmed)
+  } catch {
+    throw new Error(`HUB_URL must be an absolute http(s) URL (got: "${trimmed}")`)
+  }
+  if (
+    (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
+    parsed.username.length > 0 ||
+    parsed.password.length > 0 ||
+    parsed.pathname !== '/' ||
+    parsed.search.length > 0 ||
+    parsed.hash.length > 0
+  ) {
+    throw new Error(`HUB_URL must be an origin without credentials or path (got: "${trimmed}")`)
+  }
+  return parsed.origin
+}
+
+export const HUB_URL = resolveHubUrl(process.env.HUB_URL)
+export const HUB_REFRESH_TOKEN = process.env.HUB_REFRESH_TOKEN?.trim() || null
+
 export const PORT = resolvePort(process.env.PORT)
 
 // 既定は localhost のみ。LAN へ公開する場合だけ明示的に 0.0.0.0 や
