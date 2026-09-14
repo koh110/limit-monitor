@@ -10,6 +10,12 @@ const FRESHNESS_LABELS = {
   expired: '期限切れ'
 } as const
 
+const FRESHNESS_PRIORITY = {
+  fresh: 0,
+  stale: 1,
+  expired: 2
+} as const
+
 const PROVIDER_LABELS = {
   codex: 'Codex',
   claude: 'Claude',
@@ -17,6 +23,30 @@ const PROVIDER_LABELS = {
 } as const
 
 type RefreshState = 'idle' | 'updating' | 'failed' | 'offline' | 'timeout'
+
+function getAccountFreshness(account: StatusAccount): StatusBucket['freshness'] | undefined {
+  return account.buckets.reduce<StatusBucket['freshness'] | undefined>((current, bucket) => {
+    if (
+      current === undefined ||
+      FRESHNESS_PRIORITY[bucket.freshness] > FRESHNESS_PRIORITY[current]
+    ) {
+      return bucket.freshness
+    }
+    return current
+  }, undefined)
+}
+
+function FreshnessBadge({ freshness }: { freshness: StatusBucket['freshness'] | undefined }) {
+  if (!freshness) return null
+  return (
+    <span
+      className={`freshness freshness-${freshness}`}
+      aria-label={`鮮度: ${FRESHNESS_LABELS[freshness]}`}
+    >
+      {FRESHNESS_LABELS[freshness]}
+    </span>
+  )
+}
 
 function BucketRow({ bucket, now }: { bucket: StatusBucket; now: Date }) {
   const tone = displayTone({
@@ -27,9 +57,6 @@ function BucketRow({ bucket, now }: { bucket: StatusBucket; now: Date }) {
     <li className={`bucket tone-${tone}`}>
       <div className="bucket-head">
         <span className="bucket-label">{bucket.label}</span>
-        <span className={`freshness freshness-${bucket.freshness}`}>
-          {FRESHNESS_LABELS[bucket.freshness]}
-        </span>
       </div>
       <p className="remaining">
         <span className="remaining-caption">残り</span>
@@ -85,6 +112,7 @@ export function AccountCard({
   const [refreshState, setRefreshState] = useState<RefreshState>('idle')
   const refreshController = useRef<AbortController | null>(null)
   const refreshing = refreshState === 'updating'
+  const accountFreshness = getAccountFreshness(account)
 
   useEffect(() => {
     return () => {
@@ -132,6 +160,9 @@ export function AccountCard({
             {PROVIDER_LABELS[account.provider]}
           </h2>
           <span className="alias">{account.accountAlias}</span>
+          <Activity mode={accountFreshness ? 'visible' : 'hidden'}>
+            <FreshnessBadge freshness={accountFreshness} />
+          </Activity>
         </div>
         <div className="card-actions">
           <Activity mode={refreshStatus ? 'visible' : 'hidden'}>

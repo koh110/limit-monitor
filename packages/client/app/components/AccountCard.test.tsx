@@ -35,6 +35,58 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
+test('鮮度badgeはカード単位で最も古いbucketの状態を表示する', () => {
+  const accountWithMixedFreshness: StatusAccount = {
+    ...account,
+    buckets: [
+      {
+        bucketId: 'codex:primary',
+        label: 'Primary',
+        usedPercent: 20,
+        remainingPercent: 80,
+        windowDurationSeconds: 3600,
+        resetsAt: '2026-09-11T01:00:00.000Z',
+        observedAt: '2026-09-11T00:00:00.000Z',
+        reached: false,
+        freshness: 'fresh'
+      },
+      {
+        bucketId: 'codex:secondary',
+        label: 'Secondary',
+        usedPercent: 80,
+        remainingPercent: 20,
+        windowDurationSeconds: 86400,
+        resetsAt: '2026-09-12T00:00:00.000Z',
+        observedAt: '2026-09-10T00:00:00.000Z',
+        reached: false,
+        freshness: 'stale'
+      }
+    ]
+  }
+
+  render(
+    <AccountCard
+      account={accountWithMixedFreshness}
+      now={new Date('2026-09-11T00:00:00.000Z')}
+      onRefresh={vi.fn()}
+    />
+  )
+
+  const freshnessBadge = screen.getByText('stale')
+  expect(freshnessBadge.classList.contains('freshness')).toBe(true)
+  expect(freshnessBadge.classList.contains('freshness-stale')).toBe(true)
+  expect(screen.getAllByText('stale')).toHaveLength(1)
+  expect(screen.queryByText('最新')).toBeNull()
+})
+
+test('bucketが空のカードには鮮度badgeを表示しない', () => {
+  const view = render(
+    <AccountCard account={account} now={new Date('2026-09-11T00:00:00.000Z')} onRefresh={vi.fn()} />
+  )
+
+  expect(view.container.querySelector('.freshness')).toBeNull()
+})
+
 test('refresh button remains a compact icon control while updating', async () => {
   requestRefresh.mockImplementation(() => new Promise(() => {}))
   render(
