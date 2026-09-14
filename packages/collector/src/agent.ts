@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import WebSocket from 'ws'
 import {
   controlMessageSchema,
@@ -287,6 +287,15 @@ function readToken(): string {
   throw new Error('HUB_TOKEN or HUB_TOKEN_FILE is required')
 }
 
+export function isModuleEntrypoint(entrypoint: string | undefined, moduleUrl: string) {
+  if (!entrypoint) return false
+  try {
+    return fs.realpathSync(path.resolve(entrypoint)) === fs.realpathSync(fileURLToPath(moduleUrl))
+  } catch {
+    return false
+  }
+}
+
 const defaultAgent = createAgent({ hubUrl: HUB_URL, readToken })
 
 export function startAgent(): void {
@@ -294,6 +303,6 @@ export function startAgent(): void {
 }
 
 const entrypoint = process.argv[1]
-if (entrypoint && pathToFileURL(path.resolve(entrypoint)).href === import.meta.url) {
+if (isModuleEntrypoint(entrypoint, import.meta.url)) {
   startAgent()
 }

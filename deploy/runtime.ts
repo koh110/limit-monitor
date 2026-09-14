@@ -9,7 +9,9 @@ import {
   readEnvValue,
   removeEnvKeys,
   renderCollectorProviders,
-  renderEnvUpdates
+  renderEnvUpdates,
+  prepareRefreshTokenEnvs,
+  ensureSecretEnvFileMode
 } from './env.ts'
 import { type CommandRunner, type InstallIdentity, runAsUser, runCommand } from './exec.ts'
 
@@ -292,13 +294,23 @@ function readExample(repoRoot: string, name: 'hub' | 'dashboard' | 'collector'):
   return fs.readFileSync(path.join(repoRoot, 'deploy', `${name}.env.example`), 'utf8')
 }
 
-function envSource(
+function readExistingEnvFile(file: string): string | undefined {
+  try {
+    return readEnvFile(file)
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return undefined
+    throw error
+  }
+}
+
+export function envSource(
   dest: string,
   example: string,
   installDir: string
 ): { content: string; existing: boolean } {
-  if (fs.existsSync(dest)) {
-    const content = readEnvFile(dest)
+  const existingContent = readExistingEnvFile(dest)
+  if (existingContent !== undefined) {
+    const content = existingContent
     assertNoDuplicateEnvKeys(content, dest)
     const configured = readEnvValue(content, 'INSTALL_DIR') ?? ''
     if (configured !== installDir) {
@@ -599,9 +611,11 @@ function prepareConfig(
       readExample(request.repoRoot, 'dashboard'),
       paths.installDir
     )
+    const refresh = prepareRefreshTokenEnvs(hub.content, dashboard.content)
     const origin = dashboardOrigin(dashboard.content, dashboardDest)
-    envs.hub = syncHubCors(hub.content, origin, hubDest)
-    envs.dashboard = dashboard.content
+    envs.hub = syncHubCors(refresh.hub, origin, hubDest)
+    envs.dashboard = refresh.dashboard
+    if (refresh.generated) log('generated a shared Hub/Dashboard refresh token')
     envDestinations.hub = hubDest
     envDestinations.dashboard = dashboardDest
     validateStateDir(paths, identity)
@@ -706,10 +720,12 @@ function placeConfig(
   if (request.services.includes('server')) {
     const hubDest = prepared.envDestinations.hub!
     const dashboardDest = prepared.envDestinations.dashboard!
-    atomicWriteTextFile(hubDest, prepared.envs.hub!, 0o644)
-    if (!fs.existsSync(dashboardDest)) {
-      atomicWriteTextFile(dashboardDest, prepared.envs.dashboard!, 0o644)
-    }
+    ensureSecretEnvFileMode(hubDest)
+    ensureSecretEnvFileMode(dashboardDest)
+    atomicWriteTextFile(hubDest, prepared.envs.hub!, 0o640)
+    atomicWriteTextFile(dashboardDest, prepared.envs.dashboard!, 0o640)
+    ensureSecretEnvFileMode(hubDest)
+    ensureSecretEnvFileMode(dashboardDest)
   }
 
   if (request.services.includes('collector')) {

@@ -118,6 +118,19 @@ build対象:
 
 Hub/Dashboard deployではDashboard originとHub CORSを整合させます。Collector deployでは、`--providers`を明示した場合だけ既存`collector.env`のprovider選択を更新します。
 
+## Hub/Dashboard refresh token
+
+`HUB_REFRESH_TOKEN`はブラウザへ渡すtokenではありません。ブラウザからDashboardへ送られたrefresh要求を、Dashboard serverがHubへ転送する際だけ使用するserver-to-serverの共有tokenです。browser bundleやブラウザのrequest headerには入りません。
+
+初回の`sudo ./deploy.ts --server ...`では、次の規則でHubとDashboardのenvへtokenを自動設定します。
+
+1. 両方が未設定、空、またはexample placeholderなら、deployが暗号学的random tokenを1回だけ生成し、両方へ同じ値を設定する。
+2. 片側だけに実値がある場合は、その既存値をもう片側へ反映する。
+3. 両側に実値があり一致しない場合は、上書きせずfail-closedで停止する。
+4. tokenを含むenvは配置時にatomic更新し、新規ファイルはmode `0640`で作成する。既存ファイルに公開read bitがあれば`0600`へ締める。
+
+したがって、refresh用の共有tokenを手動でブラウザへ設定する必要はありません。既存の`hub.env` / `dashboard.env`にtokenがない旧配置からのdeployでも、既存の設定・コメントを保持したままtokenを追加します。
+
 ## Collector token
 
 Collector tokenはenvへ平文で置かず、systemd credentialで渡します。

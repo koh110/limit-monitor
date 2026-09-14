@@ -52,6 +52,7 @@ export const USAGE = `limit-monitor deploy
                      /etc/limit-monitor/collector.env へ atomic に永続化する。
                      省略時は既存 collector.env を変更せず、その設定を再利用する
   --hub-base-url     Dashboard に埋め込む Hub の URL(sudoの環境保持に依存しない)
+                     初回の --server では Hub/Dashboard の HUB_REFRESH_TOKEN を自動生成・共有する
   --force            同じ package.json version の既存 version directory を置き換える
   --dry-run          副作用なしで deployment plan を表示する
   -h, --help         このヘルプを表示する

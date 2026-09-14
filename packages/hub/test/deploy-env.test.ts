@@ -2,10 +2,13 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { expect, test } from 'vite-plus/test'
+import { envSource } from '../../../deploy/runtime.ts'
 import {
   DeployConfigError,
   atomicWriteTextFile,
   duplicateEnvKeys,
+  ensureSecretEnvFileMode,
+  prepareRefreshTokenEnvs,
   readEnvValue,
   renderCollectorProviders,
   renderEnvUpdates,
@@ -126,4 +129,130 @@ test('removeEnvKeys は obsolete key だけを除去し、他の設定とコメ�
       ''
     ].join('\n')
   )
+})
+
+test('prepareRefreshTokenEnvs は初回のplaceholderを同じtokenへ置換する', () => {
+  const result = prepareRefreshTokenEnvs(
+    [
+      '# hub settings',
+      'INSTALL_DIR=/var/www/limit-monitor',
+      'HUB_REFRESH_TOKEN=replace-with-a-random-service-token',
+      ''
+    ].join('\n'),
+    [
+      '# dashboard settings',
+      'INSTALL_DIR=/var/www/limit-monitor',
+      'HUB_REFRESH_TOKEN=replace-with-a-random-service-token',
+      ''
+    ].join('\n'),
+    () => 'generated-refresh-token'
+  )
+
+  expect(result.generated).toBe(true)
+  expect(readEnvValue(result.hub, 'HUB_REFRESH_TOKEN')).toBe('generated-refresh-token')
+  expect(readEnvValue(result.dashboard, 'HUB_REFRESH_TOKEN')).toBe('generated-refresh-token')
+  expect(result.hub).toContain('# hub settings')
+  expect(result.dashboard).toContain('# dashboard settings')
+})
+
+test('prepareRefreshTokenEnvs はtokenなしの既存envにも初回tokenを追加する', () => {
+  const result = prepareRefreshTokenEnvs(
+    'INSTALL_DIR=/var/www/limit-monitor\nCORS_ALLOWED_ORIGINS=http://127.0.0.1:8788\n',
+    'INSTALL_DIR=/var/www/limit-monitor\nHOST=0.0.0.0\n',
+    () => 'generated-refresh-token'
+  )
+
+  expect(result.generated).toBe(true)
+  expect(readEnvValue(result.hub, 'HUB_REFRESH_TOKEN')).toBe('generated-refresh-token')
+  expect(readEnvValue(result.dashboard, 'HUB_REFRESH_TOKEN')).toBe('generated-refresh-token')
+  expect(result.hub).toContain('CORS_ALLOWED_ORIGINS=http://127.0.0.1:8788')
+  expect(result.dashboard).toContain('HOST=0.0.0.0')
+})
+
+test('prepareRefreshTokenEnvs は片側の既存tokenをもう片側へ反映する', () => {
+  const hub = 'INSTALL_DIR=/var/www/limit-monitor\nHUB_REFRESH_TOKEN=existing-token\n'
+  const dashboard = 'INSTALL_DIR=/var/www/limit-monitor\n'
+  const result = prepareRefreshTokenEnvs(hub, dashboard, () => {
+    throw new Error('token generator must not be called')
+  })
+
+  expect(result.generated).toBe(false)
+  expect(result.hub).toBe(hub)
+  expect(readEnvValue(result.dashboard, 'HUB_REFRESH_TOKEN')).toBe('existing-token')
+})
+
+test('prepareRefreshTokenEnvs はHubとDashboardのtoken不一致を拒否する', () => {
+  expect(() =>
+    prepareRefreshTokenEnvs(
+      'HUB_REFRESH_TOKEN=hub-token\n',
+      'HUB_REFRESH_TOKEN=dashboard-token\n',
+      () => 'unused-token'
+    )
+  ).toThrow(/HUB_REFRESH_TOKEN differs between hub and dashboard env/)
+})
+
+test('prepareRefreshTokenEnvs は既定で暗号学的random tokenを一度だけ生成する', () => {
+  const result = prepareRefreshTokenEnvs(
+    'HUB_REFRESH_TOKEN=replace-with-a-random-service-token\n',
+    'HUB_REFRESH_TOKEN=replace-with-a-random-service-token\n'
+  )
+  const hubToken = readEnvValue(result.hub, 'HUB_REFRESH_TOKEN')
+  const dashboardToken = readEnvValue(result.dashboard, 'HUB_REFRESH_TOKEN')
+
+  expect(result.generated).toBe(true)
+  expect(hubToken).toMatch(/^[0-9a-f]{64}$/)
+  expect(dashboardToken).toBe(hubToken)
+})
+
+test('prepareRefreshTokenEnvs は生成tokenの改行を拒否する', () => {
+  expect(() =>
+    prepareRefreshTokenEnvs(
+      'HUB_REFRESH_TOKEN=replace-with-a-random-service-token\n',
+      'HUB_REFRESH_TOKEN=replace-with-a-random-service-token\n',
+      () => 'invalid\nrefresh-token'
+    )
+  ).toThrow(/generated HUB_REFRESH_TOKEN must be a non-empty single-line value/)
+})
+
+test('ensureSecretEnvFileMode は既存envの公開read bitを除去する', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'limit-monitor-secret-env-'))
+  try {
+    const file = path.join(dir, 'hub.env')
+    fs.writeFileSync(file, 'HUB_REFRESH_TOKEN=secret\n')
+    fs.chmodSync(file, 0o644)
+
+    ensureSecretEnvFileMode(file)
+
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('ensureSecretEnvFileMode はdangling symlinkを未作成として扱わない', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'limit-monitor-secret-env-link-'))
+  try {
+    const file = path.join(dir, 'hub.env')
+    fs.symlinkSync(path.join(dir, 'missing.env'), file)
+
+    expect(() => ensureSecretEnvFileMode(file)).toThrow(
+      /secret env path must be a regular non-symlink file/
+    )
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('envSource はdangling symlinkをexample未作成扱いしない', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'limit-monitor-env-source-link-'))
+  try {
+    const file = path.join(dir, 'hub.env')
+    fs.symlinkSync(path.join(dir, 'missing.env'), file)
+
+    expect(() =>
+      envSource(file, 'INSTALL_DIR=/var/www/limit-monitor\n', '/var/www/limit-monitor')
+    ).toThrow(/env path must be a regular non-symlink file/)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
 })

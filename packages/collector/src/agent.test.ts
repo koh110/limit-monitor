@@ -1,9 +1,30 @@
 import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import type { AddressInfo } from 'node:net'
+import { pathToFileURL } from 'node:url'
 import { WebSocketServer } from 'ws'
 import { expect, test } from 'vite-plus/test'
-import { createAgent, createTriggerQueue } from './agent.js'
+import { createAgent, createTriggerQueue, isModuleEntrypoint } from './agent.js'
 import { CONTROL_MAX_PAYLOAD_BYTES } from 'shared/src/control'
+
+test('agent entrypoint detection resolves the current symlink to the module file', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'limit-monitor-agent-entrypoint-'))
+  const realDir = path.join(root, 'versions', '0.1.0')
+  const modulePath = path.join(realDir, 'agent.js')
+  const currentPath = path.join(root, 'current')
+  try {
+    fs.mkdirSync(realDir, { recursive: true })
+    fs.writeFileSync(modulePath, '')
+    fs.symlinkSync(realDir, currentPath, 'dir')
+
+    expect(
+      isModuleEntrypoint(path.join(currentPath, 'agent.js'), pathToFileURL(modulePath).href)
+    ).toBe(true)
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
 
 test('agent queue coalesces periodic and same-provider manual triggers while worker runs', async () => {
   const calls: string[] = []
