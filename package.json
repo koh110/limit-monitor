@@ -16,7 +16,8 @@
     "predev:dashboard": "npm run build -w shared",
     "dev:dashboard": "npm run dev -w dashboard",
     "predev:hub": "npm run build -w shared",
-    "dev:hub": "npm run dev -w hub"
+    "dev:hub": "npm run dev -w hub",
+    "screenshot:dashboard": "node scripts/capture-dashboard-screenshot.ts"
   },
   "dependencies": {},
   "devDependencies": {
