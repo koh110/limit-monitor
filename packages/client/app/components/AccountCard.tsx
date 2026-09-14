@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { Activity, useEffect, useRef, useState } from 'react'
 import type { StatusAccount, StatusBucket } from 'shared/src/contracts'
 import { displayTone } from 'shared/src/remaining'
 import { fetchRefreshStatus, requestRefresh } from '../lib/api-client'
@@ -231,23 +231,46 @@ export function AccountCard({
         : refreshState === 'timeout'
           ? 'Refresh timed out'
           : undefined
+  const refreshStatus = refreshing ? 'Updating...' : refreshMessage
+  const refreshStatusState = refreshing ? 'updating' : refreshState
 
   return (
     <section className="card">
       <header className="card-head">
-        <h2 className={`provider provider-${account.provider}`}>
-          {PROVIDER_LABELS[account.provider]}
-        </h2>
-        <span className="alias">{account.accountAlias}</span>
-        <button
-          type="button"
-          onClick={refresh}
-          disabled={refreshing}
-          aria-label={`${account.accountAlias}を更新`}
-        >
-          {refreshing ? 'Updating...' : '↻'}
-        </button>
-        {refreshMessage ? <span role="status">{refreshMessage}</span> : null}
+        <div className="card-heading">
+          <h2 className={`provider provider-${account.provider}`}>
+            {PROVIDER_LABELS[account.provider]}
+          </h2>
+          <span className="alias">{account.accountAlias}</span>
+        </div>
+        <div className="card-actions">
+          <Activity mode={refreshStatus ? 'visible' : 'hidden'}>
+            <span className={`refresh-status refresh-status-${refreshStatusState}`} role="status">
+              {refreshStatus}
+            </span>
+          </Activity>
+          <button
+            className="refresh-button"
+            type="button"
+            onClick={refresh}
+            disabled={refreshing}
+            aria-label={`${account.accountAlias}を更新`}
+            aria-busy={refreshing}
+            title={refreshing ? '更新中' : '今すぐ更新'}
+          >
+            <svg
+              className={`refresh-icon${refreshing ? ' refresh-icon-spinning' : ''}`}
+              viewBox="0 0 24 24"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path d="M20 11a8 8 0 0 0-14.8-4.3L3 9" />
+              <path d="M3 4v5h5" />
+              <path d="M4 13a8 8 0 0 0 14.8 4.3L21 15" />
+              <path d="M21 20v-5h-5" />
+            </svg>
+          </button>
+        </div>
       </header>
       <ul className="buckets">
         {account.buckets.map((bucket) => {

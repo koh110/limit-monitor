@@ -35,6 +35,27 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
+test('refresh button remains a compact icon control while updating', async () => {
+  requestRefresh.mockImplementation(() => new Promise(() => {}))
+  render(
+    <AccountCard account={account} now={new Date('2026-09-11T00:00:00.000Z')} onRefresh={vi.fn()} />
+  )
+
+  const button = screen.getByRole('button', { name: 'mainを更新' })
+  expect(button.classList.contains('refresh-button')).toBe(true)
+  expect(button.querySelector('svg.refresh-icon')).not.toBeNull()
+
+  await act(async () => {
+    fireEvent.click(button)
+    await Promise.resolve()
+  })
+
+  expect(button.hasAttribute('disabled')).toBe(true)
+  expect(button.getAttribute('aria-busy')).toBe('true')
+  expect(button.getAttribute('title')).toBe('更新中')
+  expect(button.querySelector('svg.refresh-icon-spinning')).not.toBeNull()
+})
+
 test('長時間のrefreshはHub offlineではなく明示的なtimeoutを表示する', async () => {
   render(
     <AccountCard account={account} now={new Date('2026-09-11T00:00:00.000Z')} onRefresh={vi.fn()} />
