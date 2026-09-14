@@ -51,6 +51,59 @@ body {
   margin: 0;
 }
 
+.dashboard-title {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.refresh-all-status {
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+
+.refresh-all-status-failed,
+.refresh-all-status-timeout {
+  color: var(--red);
+}
+
+.refresh-all-status-offline {
+  color: var(--yellow);
+}
+
+.refresh-all-button {
+  appearance: none;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  transition:
+    color 150ms ease,
+    border-color 150ms ease,
+    background-color 150ms ease;
+}
+
+.refresh-all-button:hover:not(:disabled) {
+  border-color: var(--green);
+  background: rgba(52, 193, 118, 0.1);
+  color: var(--green);
+}
+
+.refresh-all-button:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+
+.refresh-all-button:disabled {
+  color: var(--text-dim);
+  cursor: not-allowed;
+}
+
 .hub-state {
   margin: 0;
   font-size: 0.8rem;
@@ -207,7 +260,8 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .refresh-button {
+  .refresh-button,
+  .refresh-all-button {
     transition: none;
   }
 
