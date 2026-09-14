@@ -62,13 +62,13 @@ export default function Dashboard({ loaderData: result }: Route.ComponentProps) 
 
   const refreshAllMessage =
     refreshAllState === 'updating'
-      ? '全カードを更新中…'
+      ? 'すべてのアカウントを更新中…'
       : refreshAllState === 'failed'
-        ? '一部のカードを更新できませんでした'
+        ? '一部のアカウントを更新できませんでした'
         : refreshAllState === 'offline'
           ? 'Hub に接続できませんでした'
           : refreshAllState === 'timeout'
-            ? '全カードの更新がタイムアウトしました'
+            ? 'すべてのアカウントの更新がタイムアウトしました'
             : undefined
 
   return (
@@ -91,7 +91,7 @@ export default function Dashboard({ loaderData: result }: Route.ComponentProps) 
           disabled={!result.ok || result.body.accounts.length === 0 || refreshingAll}
           aria-busy={refreshingAll}
         >
-          {refreshingAll ? '更新中…' : '全カードを更新'}
+          {refreshingAll ? '更新中…' : 'すべてのアカウントを更新'}
         </button>
         {/* Result 型の絞り込みが必要なため条件分岐で描画する */}
         {result.ok ? (

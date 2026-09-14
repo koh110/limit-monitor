@@ -58,7 +58,7 @@ Dashboardの実画面を確認してrepositoryのscreenshotを更新:
 npm run screenshot:dashboard
 ```
 
-スクリプトはChromiumで画面を一定時間待ってから、全カード更新ボタンとカード描画を確認します。カードが表示されない場合は既存の画像を置き換えず失敗します。接続先や出力先を変更する場合は`--url`、`--output`、Chromiumの場所は`--chromium`で指定できます。
+スクリプトはChromiumで画面を一定時間待ってから、すべてのアカウントを更新するボタンとアカウント描画を確認します。アカウントが表示されない場合は既存の画像を置き換えず失敗します。接続先や出力先を変更する場合は`--url`、`--output`、Chromiumの場所は`--chromium`で指定できます。
 
 Collectorを手動起動する場合は、Hub tokenを環境変数で渡します。
 

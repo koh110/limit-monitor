@@ -86,12 +86,12 @@ test('Hub へ到達できない場合は OFFLINE 表示へ落ちる', async () =
   expect(screen.getByText('Limit Hub へ接続できません')).toBeTruthy()
 })
 
-test('全カードを更新ボタンは表示中の全アカウントを更新する', async () => {
+test('すべてのアカウントを更新するボタンは表示中の全アカウントを更新する', async () => {
   fetchStatus.mockResolvedValue(onlineWithAccounts)
 
   renderDashboard()
 
-  const button = await screen.findByRole('button', { name: '全カードを更新' })
+  const button = await screen.findByRole('button', { name: 'すべてのアカウントを更新' })
   fireEvent.click(button)
   await vi.waitFor(() => expect(refreshAccount).toHaveBeenCalledTimes(2))
   expect(refreshAccount.mock.calls.map(([account]) => account.accountAlias)).toEqual([

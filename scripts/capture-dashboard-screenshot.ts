@@ -65,7 +65,7 @@ async function main() {
     })
 
     const dom = await readFile(domPath, 'utf8')
-    if (!dom.includes('全カードを更新')) {
+    if (!dom.includes('すべてのアカウントを更新')) {
       throw new Error('dashboard did not render the bulk refresh button')
     }
     if (!dom.includes('class="card"')) {
