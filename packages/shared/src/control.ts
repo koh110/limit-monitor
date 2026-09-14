@@ -37,6 +37,8 @@ export const refreshStatusSchema = z.enum([
 ])
 export type RefreshStatus = z.infer<typeof refreshStatusSchema>
 
+export const requestIdSchema = z.uuid()
+
 export const refreshRequestResponseSchema = z.object({
   schemaVersion: z.literal(SCHEMA_VERSION),
   requestId: z.uuid(),
