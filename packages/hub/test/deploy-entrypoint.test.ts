@@ -5,7 +5,7 @@ import path from 'node:path'
 import { expect, test } from 'vite-plus/test'
 import { dryRunSummary, parseArgs } from '../../../deploy.ts'
 import { type CommandRunner } from '../../../deploy/exec.ts'
-import { copyEntry, resolveInstallIdentity } from '../../../deploy/runtime.ts'
+import { copyEntry, prepareCollectorEnv, resolveInstallIdentity } from '../../../deploy/runtime.ts'
 
 const REPO_ROOT = path.resolve(import.meta.dirname, '../../..')
 const DEPLOY_TS = path.join(REPO_ROOT, 'deploy.ts')
@@ -284,4 +284,48 @@ test('identity: uid 0 / 不正名 / primary group 不明を fail-closed にす�
       0
     )
   ).toThrow(/cannot resolve the primary group/)
+})
+
+test('canonical deploy runtime は既存 collector.env から obsolete interval だけを除去する', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'limit-monitor-collector-env-migration-'))
+  try {
+    const dest = path.join(dir, 'collector.env')
+    fs.writeFileSync(
+      dest,
+      [
+        'INSTALL_DIR=/var/www/limit-monitor',
+        'COLLECTOR_MODE=mock',
+        'COLLECTOR_INTERVAL_SECONDS=60',
+        'SOURCE_ID=existing-host',
+        'COLLECTOR_PROVIDERS=codex',
+        ''
+      ].join('\n')
+    )
+
+    const prepared = prepareCollectorEnv(
+      () => {
+        throw new Error('mock runner must not be called for COLLECTOR_MODE=mock')
+      },
+      {
+        user: 'test-user',
+        uid: 1000,
+        group: 'test-group',
+        gid: 1000,
+        home: '/tmp',
+        shell: '/bin/sh'
+      },
+      REPO_ROOT,
+      dest,
+      '/var/www/limit-monitor',
+      undefined,
+      {}
+    )
+
+    expect(prepared.existing).toBe(true)
+    expect(prepared.content).not.toContain('COLLECTOR_INTERVAL_SECONDS')
+    expect(prepared.content).toContain('SOURCE_ID=existing-host')
+    expect(prepared.content).toContain('COLLECTOR_PROVIDERS=codex')
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
 })

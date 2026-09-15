@@ -1,0 +1,168 @@
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import type { StatusAccount } from 'shared/src/contracts'
+import { afterEach, beforeEach, expect, test, vi } from 'vite-plus/test'
+import { AccountCard } from './AccountCard'
+
+const { requestRefresh, fetchRefreshStatus } = vi.hoisted(() => {
+  return {
+    requestRefresh: vi.fn(),
+    fetchRefreshStatus: vi.fn()
+  }
+})
+
+vi.mock('../lib/api-client', () => {
+  return { requestRefresh, fetchRefreshStatus }
+})
+
+const account: StatusAccount = {
+  provider: 'codex',
+  accountAlias: 'main',
+  buckets: []
+}
+
+beforeEach(() => {
+  vi.useFakeTimers()
+  requestRefresh.mockResolvedValue({
+    ok: true,
+    body: { schemaVersion: 1, requestId: '00000000-0000-4000-8000-000000000001', status: 'queued' }
+  })
+  fetchRefreshStatus.mockResolvedValue('running')
+})
+
+afterEach(() => {
+  cleanup()
+  vi.useRealTimers()
+  vi.clearAllMocks()
+})
+
+test('鮮度badgeはカード単位で最も古いbucketの状態を表示する', () => {
+  const accountWithMixedFreshness: StatusAccount = {
+    ...account,
+    buckets: [
+      {
+        bucketId: 'codex:primary',
+        label: 'Primary',
+        usedPercent: 20,
+        remainingPercent: 80,
+        windowDurationSeconds: 3600,
+        resetsAt: '2026-09-11T01:00:00.000Z',
+        observedAt: '2026-09-11T00:00:00.000Z',
+        reached: false,
+        freshness: 'fresh'
+      },
+      {
+        bucketId: 'codex:secondary',
+        label: 'Secondary',
+        usedPercent: 80,
+        remainingPercent: 20,
+        windowDurationSeconds: 86400,
+        resetsAt: '2026-09-12T00:00:00.000Z',
+        observedAt: '2026-09-10T00:00:00.000Z',
+        reached: false,
+        freshness: 'stale'
+      }
+    ]
+  }
+
+  render(
+    <AccountCard
+      account={accountWithMixedFreshness}
+      now={new Date('2026-09-11T00:00:00.000Z')}
+      onRefresh={vi.fn()}
+    />
+  )
+
+  const freshnessBadge = screen.getByText('stale')
+  expect(freshnessBadge.classList.contains('freshness')).toBe(true)
+  expect(freshnessBadge.classList.contains('freshness-stale')).toBe(true)
+  expect(screen.getAllByText('stale')).toHaveLength(1)
+  expect(screen.queryByText('最新')).toBeNull()
+})
+
+test('bucketが空のカードには鮮度badgeを表示しない', () => {
+  const view = render(
+    <AccountCard account={account} now={new Date('2026-09-11T00:00:00.000Z')} onRefresh={vi.fn()} />
+  )
+
+  expect(view.container.querySelector('.freshness')).toBeNull()
+})
+
+test('refresh button remains a compact icon control while updating', async () => {
+  requestRefresh.mockImplementation(() => new Promise(() => {}))
+  render(
+    <AccountCard account={account} now={new Date('2026-09-11T00:00:00.000Z')} onRefresh={vi.fn()} />
+  )
+
+  const button = screen.getByRole('button', { name: 'mainを更新' })
+  expect(button.classList.contains('refresh-button')).toBe(true)
+  expect(button.querySelector('svg.refresh-icon')).not.toBeNull()
+
+  await act(async () => {
+    fireEvent.click(button)
+    await Promise.resolve()
+  })
+
+  expect(button.hasAttribute('disabled')).toBe(true)
+  expect(button.getAttribute('aria-busy')).toBe('true')
+  expect(button.getAttribute('title')).toBe('更新中')
+  expect(button.querySelector('svg.refresh-icon-spinning')).not.toBeNull()
+})
+
+test('長時間のrefreshはHub offlineではなく明示的なtimeoutを表示する', async () => {
+  render(
+    <AccountCard account={account} now={new Date('2026-09-11T00:00:00.000Z')} onRefresh={vi.fn()} />
+  )
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'mainを更新' }))
+    await Promise.resolve()
+  })
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000)
+  })
+
+  expect(screen.getByRole('status').textContent).toBe('Refresh timed out')
+  expect(screen.queryByText('Hub offline')).toBeNull()
+})
+
+test('pending status fetch is interrupted by the wall-clock refresh timeout', async () => {
+  fetchRefreshStatus.mockImplementation(() => {
+    return new Promise(() => {})
+  })
+  render(
+    <AccountCard account={account} now={new Date('2026-09-11T00:00:00.000Z')} onRefresh={vi.fn()} />
+  )
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'mainを更新' }))
+    await Promise.resolve()
+  })
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000)
+  })
+
+  expect(screen.getByRole('status').textContent).toBe('Refresh timed out')
+})
+
+test('unmount 時に進行中のrefresh requestをabortする', async () => {
+  let requestSignal: AbortSignal | undefined
+  requestRefresh.mockImplementation((_provider, _accountAlias, signal) => {
+    requestSignal = signal
+    return new Promise(() => {})
+  })
+  const view = render(
+    <AccountCard account={account} now={new Date('2026-09-11T00:00:00.000Z')} onRefresh={vi.fn()} />
+  )
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'mainを更新' }))
+    await Promise.resolve()
+  })
+  expect(requestSignal).toBeDefined()
+
+  act(() => {
+    view.unmount()
+  })
+
+  expect(requestSignal?.aborted).toBe(true)
+})

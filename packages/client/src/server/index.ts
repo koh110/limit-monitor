@@ -1,8 +1,12 @@
-import { DASHBOARD_DIST_DIR, HOST, PORT } from './config.js'
+import { DASHBOARD_DIST_DIR, HOST, HUB_REFRESH_TOKEN, HUB_URL, PORT } from './config.js'
 import { logger } from './logger.js'
 import { createStaticServer } from './static-server.js'
 
-const server = createStaticServer({ distDir: DASHBOARD_DIST_DIR })
+const server = createStaticServer({
+  distDir: DASHBOARD_DIST_DIR,
+  hubUrl: HUB_URL,
+  hubRefreshToken: HUB_REFRESH_TOKEN
+})
 
 server.listen(PORT, HOST, () => {
   logger.log({

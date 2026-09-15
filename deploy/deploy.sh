@@ -561,33 +561,138 @@ validate_dashboard_cors() {
   [[ "$found" -eq 1 ]] || die "${hub_env_file} must allow dashboard origin ${client_origin}"
 }
 
-# collector の COLLECTOR_INTERVAL_SECONDS(既定 60)を解決して unit Type を返す:
-#   0        -> oneshot (1 回送信して終了; start/restart は実処理終了まで block し、
-#               返却後に Result=success / ExecMainStatus=0 が確認できる)
-#   >0 / 既定 -> simple  (常駐送信; systemctl start は即 return し is-active=active
-#               が確認できる)
-# 値は collector.env が優先で、無ければ hub.env をフォールバック(on-disk の
-# 既存 env が優先、無いなら render 済み temp、両方無いなら既定 60)。
-# interval 値が不正(整数でない / 負)は fail-closed で die する。
-collector_unit_type() {
-  local file raw
-  file="$(env_file_or_rendered "${LIMIT_MONITOR_ETC_DIR}/collector.env" "${RENDERED_ENV_DIR}/collector.env")"
-  raw="$(trim_space "$(read_env_value "${file}" "COLLECTOR_INTERVAL_SECONDS" "")")"
-  if [[ -z "${raw}" ]]; then
-    file="$(env_file_or_rendered "${LIMIT_MONITOR_ETC_DIR}/hub.env" "${RENDERED_ENV_DIR}/hub.env")"
-    raw="$(trim_space "$(read_env_value "${file}" "COLLECTOR_INTERVAL_SECONDS" "")")"
+# HUB_REFRESH_TOKEN を env file の行へ設定・置換する(行がなければ末尾追加)。
+# render 済み temp 専用。既存 on-disk env への書き込みはしない。
+set_env_refresh_token() {
+  local file="$1"
+  local token="$2"
+  local tmp line found=0
+  tmp="$(mktemp "${TMPDIR:-/tmp}/limit-env-token.XXXXXX")"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == HUB_REFRESH_TOKEN=* ]]; then
+      line="HUB_REFRESH_TOKEN=${token}"
+      found=1
+    fi
+    printf '%s\n' "$line" >> "$tmp"
+  done < "$file"
+  if [[ "$found" -eq 0 ]]; then
+    printf 'HUB_REFRESH_TOKEN=%s\n' "$token" >> "$tmp"
   fi
-  if [[ -z "${raw}" ]]; then
-    raw=60
-  fi
-  if ! [[ "${raw}" =~ ^[0-9]+$ ]]; then
-    die "collector unit Type 解決失敗: COLLECTOR_INTERVAL_SECONDS は 0 以上の整数で設定してください (got: ${raw})"
-  fi
-  if [[ "${raw}" -eq 0 ]]; then
-    printf 'oneshot'
+  mv -f -- "$tmp" "$file"
+}
+
+# render 済み temp である場合のみ set_env_refresh_token を実行する。
+# 既存 on-disk env への上書きはしない(fail-closed: die する)。
+maybe_set_env_refresh_token() {
+  local file="$1"
+  local token="$2"
+  case "$file" in
+    "${RENDERED_ENV_DIR}"/*)
+      set_env_refresh_token "$file" "$token"
+      ;;
+    *)
+      die "HUB_REFRESH_TOKEN in ${file} is still the example placeholder, but it is an existing on-disk env; set a real token there (deploy does not overwrite existing env files)"
+      ;;
+  esac
+}
+
+# HUB_REFRESH_TOKEN を random 値で生成する(openssl 不在では /dev/urandom)。
+generate_refresh_token() {
+  local token=""
+  if command -v openssl >/dev/null 2>&1; then
+    token="$(openssl rand -hex 32)"
   else
-    printf 'simple'
+    token="$(od -vN 32 -An -tx1 /dev/urandom | tr -d ' \n')"
   fi
+  [[ -n "$token" ]] || die "failed to generate HUB_REFRESH_TOKEN"
+  printf '%s' "$token"
+}
+
+# HUB_REFRESH_TOKEN を解決する(Major 3)。検証フェーズの CORS sync より前に
+# 呼び、effective env にも token が載る(sync は HUB_REFRESH_TOKEN 行を保持する)。
+#   - 初回(hub/dashboard とも render temp の placeholder): 同じ random token
+#     を生成して両方に設定する
+#   - 片側のみ placeholder: 既存側の実値を placeholder 側の render temp へ
+#     反映する(既存 on-disk env は上書きしない)
+#   - 両側とも実値: ここでは何も書かない(一致は validate_refresh_token が検証)
+resolve_hub_refresh_token() {
+  local hub_env_file="$1"
+  local dashboard_env_file="$2"
+  local placeholder='replace-with-a-random-service-token'
+  local hub_token dash_token
+  hub_token="$(read_env_value "$hub_env_file" HUB_REFRESH_TOKEN '')"
+  dash_token="$(read_env_value "$dashboard_env_file" HUB_REFRESH_TOKEN '')"
+
+  if [[ "$hub_token" == "$placeholder" && "$dash_token" == "$placeholder" ]]; then
+    local token
+    token="$(generate_refresh_token)"
+    maybe_set_env_refresh_token "$hub_env_file" "$token"
+    maybe_set_env_refresh_token "$dashboard_env_file" "$token"
+    log "generated a new HUB_REFRESH_TOKEN shared by hub.env and dashboard.env (first install)"
+    return 0
+  fi
+
+  if [[ "$hub_token" == "$placeholder" ]]; then
+    [[ -n "$dash_token" && "$dash_token" != "$placeholder" ]] \
+      || die "HUB_REFRESH_TOKEN in ${hub_env_file} is the example placeholder and ${dashboard_env_file} has no usable token to adopt; set a real HUB_REFRESH_TOKEN in ${dashboard_env_file} first"
+    maybe_set_env_refresh_token "$hub_env_file" "$dash_token"
+    log "adopted HUB_REFRESH_TOKEN from ${dashboard_env_file} into ${hub_env_file}"
+    return 0
+  fi
+
+  if [[ "$dash_token" == "$placeholder" ]]; then
+    [[ -n "$hub_token" && "$hub_token" != "$placeholder" ]] \
+      || die "HUB_REFRESH_TOKEN in ${dashboard_env_file} is the example placeholder and ${hub_env_file} has no usable token to adopt; set a real HUB_REFRESH_TOKEN in ${hub_env_file} first"
+    maybe_set_env_refresh_token "$dashboard_env_file" "$hub_token"
+    log "adopted HUB_REFRESH_TOKEN from ${hub_env_file} into ${dashboard_env_file}"
+    return 0
+  fi
+
+  # 両側とも実値: 一致・placeholder なしは validate_refresh_token が検証する
+  return 0
+}
+
+# HUB_REFRESH_TOKEN の最終検証(Major 3)。**読み取り専用**。
+#   - 両 env に存在する(空でない)
+#   - example の placeholder 値ではない
+#   - hub.env と dashboard.env で一致する
+validate_refresh_token() {
+  local hub_env_file="$1"
+  local dashboard_env_file="$2"
+  local placeholder='replace-with-a-random-service-token'
+  local hub_token dash_token
+  hub_token="$(read_env_value "$hub_env_file" HUB_REFRESH_TOKEN '')"
+  dash_token="$(read_env_value "$dashboard_env_file" HUB_REFRESH_TOKEN '')"
+
+  [[ -n "$hub_token" ]] \
+    || die "HUB_REFRESH_TOKEN is missing from ${hub_env_file}"
+  [[ -n "$dash_token" ]] \
+    || die "HUB_REFRESH_TOKEN is missing from ${dashboard_env_file}"
+  [[ "$hub_token" != "$placeholder" ]] \
+    || die "HUB_REFRESH_TOKEN in ${hub_env_file} is still the example placeholder; set a real random token (a fresh install generates one automatically)"
+  [[ "$dash_token" != "$placeholder" ]] \
+    || die "HUB_REFRESH_TOKEN in ${dashboard_env_file} is still the example placeholder; set a real random token (a fresh install generates one automatically)"
+  [[ "$hub_token" == "$dash_token" ]] \
+    || die "HUB_REFRESH_TOKEN differs between ${hub_env_file} and ${dashboard_env_file}; the hub refresh API and the dashboard proxy must share the same token"
+  log "verified HUB_REFRESH_TOKEN consistency between ${hub_env_file} and ${dashboard_env_file}"
+}
+
+# HUB_REFRESH_TOKEN を含む既存 env file の mode を 0640 以上(0600/0640)と
+# 検証する(Major 3)。world-readable(0644 等)の既存 env は拒否する。
+# 新規(未作成)env は配置フェーズで 0640 として作成するためここでは対象外。
+validate_refresh_token_mode() {
+  local env_file="$1"
+  [[ -e "$env_file" ]] || return 0
+  local perm
+  perm="$(stat -c '%a' "$env_file")"
+  case "$perm" in
+    600|640)
+      return 0
+      ;;
+    *)
+      die "${env_file} mode is ${perm} but must be 0640 or stricter (0600 or 0640); it holds the HUB_REFRESH_TOKEN secret (fix with: chmod 0640 ${env_file})"
+      ;;
+  esac
 }
 
 render_unit_from_template() {
@@ -612,12 +717,9 @@ render_unit_from_template() {
     -e "s|^User=CHANGE_ME$|User=${INSTALL_USER}|" \
     -e "s|^Group=CHANGE_ME$|Group=${INSTALL_GROUP}|" \
     "$out"
-  # 3) collector unit のみ: COLLECTOR_INTERVAL_SECONDS と Type を整合させる
-  #    (既定 60 -> simple / 0 -> oneshot)。template 側の既定 Type=simple は
-  #    安全な値のまま保持し、env から render で上書きする。render 後の
-  #    Type 妥当性は validate_rendered_units(systemd-analyze verify)で確認する
+  # 3) Collector は常駐 Agent のため Type=simple を template の値から変更しない。
+  #    provider collection は Agent の child worker が oneshot で担当する。
   if [[ "${unit_name}" == "limit-monitor-collector.service" ]]; then
-  local unit_type rendered_type
   # --providers 指定時は EnvironmentFile より後ろに Environment= を追加し、
   # env ファイルを編集せず deploy 時の選択を実効設定として固定する。
   if [[ -n "${DEPLOY_COLLECTOR_PROVIDERS:-}" ]]; then
@@ -629,13 +731,8 @@ render_unit_from_template() {
     grep -qxF "Environment=COLLECTOR_PROVIDERS=${DEPLOY_COLLECTOR_PROVIDERS}" "$out" \
       || die "failed to render collector providers into ${unit_name}"
   fi
-  unit_type="$(collector_unit_type)"
-  sed -i "s|^Type=.*$|Type=${unit_type}|" "$out"
-    # render 済み unit に期待 Type が入ることを read-back で検証(fail-closed)
-    rendered_type="$(sed -n 's|^Type=||p' "$out" | head -n1)"
-    if [[ "${rendered_type}" != "${unit_type}" ]]; then
-      die "rendered ${unit_name} Type is ${rendered_type:-<missing>}, expected ${unit_type} (COLLECTOR_INTERVAL_SECONDS based)"
-    fi
+    grep -qx 'Type=simple' "$out" \
+      || die "${unit_name} must remain Type=simple because it runs the resident collector Agent"
   fi
 }
 
@@ -654,6 +751,12 @@ validate_rendered_units() {
     [[ -x "$node_path" ]] || die "${rendered} ExecStart references missing node binary: ${node_path}"
     # systemd 展開で使われる \$INSTALL_DIR が unit 内に残っているか
     grep -q 'ExecStart=.*\${INSTALL_DIR}' "$unit_file" || die "${rendered} ExecStart lost \${INSTALL_DIR}"
+    if [[ "${rendered}" == "limit-monitor-collector.service" ]]; then
+      grep -qx 'Type=simple' "$unit_file" \
+        || die "${rendered} must use Type=simple for the resident collector Agent"
+      grep -q 'ExecStart=.*packages/collector/dist/src/agent\.js' "$unit_file" \
+        || die "${rendered} must start packages/collector/dist/src/agent.js"
+    fi
     # systemd がある環境では parse を完了させる。current を切替える前に
     # 壊れた unit を配置しないため、verify 失敗は warning ではなく
     # fail-closed(die)にする(失敗すると current は切替えない)。
@@ -796,6 +899,35 @@ ensure_env_install_dir() {
   render_env_example "$example" "$rendered"
   install_if_missing_or_same "$rendered" "$dest" "$mode"
   rm -f "$rendered"
+}
+
+# 既存 collector.env から削除済み設定を除去する(upgrade migration)。
+# 他の運用設定は保持し、同一ディレクトリの temporary + atomic mv で更新する。
+remove_legacy_collector_interval() {
+  local dest="$1"
+  [[ -e "$dest" ]] || return 0
+
+  local tmp line normalized changed=0
+  tmp="$(mktemp "${dest}.legacy-clean.XXXXXX")"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    normalized="$(trim_leading_space "$line")"
+    normalized="${normalized%$'\r'}"
+    if [[ "$normalized" == COLLECTOR_INTERVAL_SECONDS=* ]]; then
+      changed=1
+      continue
+    fi
+    printf '%s\n' "$line" >> "$tmp"
+  done < "$dest"
+
+  if (( changed == 0 )); then
+    rm -f -- "$tmp"
+    return 0
+  fi
+
+  chmod --reference="$dest" "$tmp"
+  chown --reference="$dest" "$tmp"
+  mv -f -- "$tmp" "$dest"
+  log "removed legacy COLLECTOR_INTERVAL_SECONDS from ${dest}"
 }
 
 # 検証対象 env の解決: on-disk の dest が存在すればそれを使い、存在しなければ
@@ -1837,7 +1969,8 @@ REQUIRED_BUILD_ARTIFACTS=(
   packages/hub/dist/src/index.js
   # Hub token CLI(bin/tokens.ts)の runtime import 先
   packages/hub/dist/src/features/tokens/store.js
-  packages/collector/dist/src/index.js
+  packages/collector/dist/src/agent.js
+  packages/collector/dist/src/worker.js
   packages/client/dist/public/index.html
   packages/client/dist/server/index.js
   packages/client/dist/server/static-server.js
@@ -2050,6 +2183,15 @@ if [[ "${DEPLOY_INSTALL_SYSTEMD}" == "1" ]]; then
   HUB_ENV_FOR_DEPLOY="$(env_file_or_rendered "${LIMIT_MONITOR_ETC_DIR}/hub.env" "${RENDERED_ENV_DIR}/hub.env")"
   DASHBOARD_ENV_FOR_DEPLOY="$(env_file_or_rendered "${LIMIT_MONITOR_ETC_DIR}/dashboard.env" "${RENDERED_ENV_DIR}/dashboard.env")"
   if [[ "${INSTALL_SERVER}" -eq 1 ]]; then
+    # 1b) refresh token: 初回(hub/dashboard とも placeholder)は共有 random
+    #     token を自動生成し render temp に設定する。片側のみ placeholder
+    #     なら既存側の値を render temp へ反映する。既存 on-disk env は
+    #     上書きしない(fail-closed: die)。CORS sync より前に呼び、
+    #     effective env にも token が載る
+    resolve_hub_refresh_token "${HUB_ENV_FOR_DEPLOY}" "${DASHBOARD_ENV_FOR_DEPLOY}"
+    # 1c) --hub-base-urlに連動するCORS設定をtemporary envへ同期する。
+    #     Dashboardの既存設定(host/port/public origin)は変更せず、現在の
+    #     Dashboard originだけをHubのCORS_ALLOWED_ORIGINSへ追加する。
     dashboard_origin="$(dashboard_origin_from_env "${DASHBOARD_ENV_FOR_DEPLOY}")"
     HUB_ENV_SYNCED="${RENDERED_ENV_DIR}/hub-effective.env"
     sync_hub_cors_origin "${HUB_ENV_FOR_DEPLOY}" "${HUB_ENV_SYNCED}" "${dashboard_origin}"
@@ -2066,7 +2208,7 @@ if [[ "${DEPLOY_INSTALL_SYSTEMD}" == "1" ]]; then
       "${RENDERED_SYSTEMD_DIR}/${template}"
     log "rendered ${template} (ExecStart node: ${DEPLOY_NODE_BIN}, User/Group: ${INSTALL_USER}:${INSTALL_GROUP})"
     if [[ "${template}" == "limit-monitor-collector.service" ]]; then
-      log "rendered ${template} Type=$(sed -n 's|^Type=||p' "${RENDERED_SYSTEMD_DIR}/${template}") (COLLECTOR_INTERVAL_SECONDS based)"
+      log "rendered ${template} as the resident Type=simple Agent"
     fi
   done < <(selected_unit_templates)
   # 3) rendered unit の検証(placeholder 除去 / node 実在 / systemd-analyze verify)
@@ -2110,6 +2252,13 @@ if [[ "${DEPLOY_INSTALL_SYSTEMD}" == "1" ]]; then
     validate_dashboard_cors \
       "${HUB_ENV_FOR_DEPLOY}" \
       "${DASHBOARD_ENV_FOR_DEPLOY}"
+    # 8b) refresh token: placeholder 拒否 + hub/dashboard 一致(Major 3)。
+    #      既存 env の mode は 0640 以上(0600/0640)でなければ die
+    validate_refresh_token \
+      "${HUB_ENV_FOR_DEPLOY}" \
+      "${DASHBOARD_ENV_FOR_DEPLOY}"
+    validate_refresh_token_mode "${LIMIT_MONITOR_ETC_DIR}/hub.env"
+    validate_refresh_token_mode "${LIMIT_MONITOR_ETC_DIR}/dashboard.env"
   fi
   if [[ "${INSTALL_COLLECTOR}" -eq 1 ]]; then
     # 9) collector token: symlink 拒否 / 非空 / root / mode 600(既存は上書きしない)
@@ -2135,15 +2284,29 @@ if [[ "${DEPLOY_INSTALL_SYSTEMD}" == "1" ]]; then
   # 既存は非上書き + 不一致は検証フェーズ(6)で die 済み)
   if [[ "${INSTALL_SERVER}" -eq 1 ]]; then
     # Hub envは検証済みのtemporary内容を配置する。既存envでも
-    # CORS_ALLOWED_ORIGINSへのDashboard origin追加だけを反映し、他の値と
-    # 既存ファイルのmodeは保持する。
-    hub_env_mode=0644
+    # CORS_ALLOWED_ORIGINSへのDashboard origin追加と refresh token 解決
+    # だけを反映し、他の値と既存ファイルのmodeは保持する。
+    # HUB_REFRESH_TOKEN を含むため新規作成は 0640(world-readable 不可)。
+    # 既存は検証フェーズ(8b)で 0600/0640 が確認済み
+    # 旧 collector_unit_type() は hub.env からも COLLECTOR_INTERVAL_SECONDS
+    # を読んでいたので、既存 hub.env の legacy key も除去する(upgrade 移行)
+    remove_legacy_collector_interval "${HUB_ENV_FOR_DEPLOY}"
+    hub_env_mode=0640
     if [[ -e "${LIMIT_MONITOR_ETC_DIR}/hub.env" ]]; then
       hub_env_mode="$(stat -c '%a' "${LIMIT_MONITOR_ETC_DIR}/hub.env")"
     fi
     install -m "${hub_env_mode}" "${HUB_ENV_FOR_DEPLOY}" "${LIMIT_MONITOR_ETC_DIR}/hub.env"
-    log "installed synchronized ${LIMIT_MONITOR_ETC_DIR}/hub.env (Dashboard origin only)"
-    ensure_env_install_dir "${REPO_ROOT}/deploy/dashboard.env.example" "${LIMIT_MONITOR_ETC_DIR}/dashboard.env" 0644
+    log "installed synchronized ${LIMIT_MONITOR_ETC_DIR}/hub.env (Dashboard origin + refresh token, mode ${hub_env_mode})"
+    # dashboard.env も HUB_REFRESH_TOKEN を含むため 0640。初回(未作成)は
+    # 検証フェーズ(1b)で token を解決済みの render temp をそのまま配置する
+    # (example を render し直すと placeholder のままだ)。既存は非上書き +
+    # mode は 8b で 0600/0640 が確認済み
+    if [[ -e "${LIMIT_MONITOR_ETC_DIR}/dashboard.env" ]]; then
+      ensure_env_install_dir "${REPO_ROOT}/deploy/dashboard.env.example" "${LIMIT_MONITOR_ETC_DIR}/dashboard.env" 0640
+    else
+      ensure_env_install_dir "${REPO_ROOT}/deploy/dashboard.env.example" "${LIMIT_MONITOR_ETC_DIR}/dashboard.env" 0640 \
+        "${DASHBOARD_ENV_FOR_DEPLOY}"
+    fi
   fi
   if [[ "${INSTALL_COLLECTOR}" -eq 1 ]]; then
     # 初回(collector.env 未作成)は検証フェーズ(1a)で CLI path を render 済み
@@ -2155,6 +2318,7 @@ if [[ "${DEPLOY_INSTALL_SYSTEMD}" == "1" ]]; then
       ensure_env_install_dir "${REPO_ROOT}/deploy/collector.env.example" "${LIMIT_MONITOR_ETC_DIR}/collector.env" 0640 \
         "${RENDERED_ENV_DIR}/collector.env"
     fi
+    remove_legacy_collector_interval "${LIMIT_MONITOR_ETC_DIR}/collector.env"
   fi
 fi
 
@@ -2201,26 +2365,9 @@ done
 apply_unit_state() {
   local unit="$1"
 
-  # collector oneshot(COLLECTOR_INTERVAL_SECONDS=0)対応: unit は
-  # Type=oneshot で render 済み(既定 60 は Type=simple の常駐)。oneshot では
-  # systemctl start / restart が実処理終了までブロックする(起動成功 =
-  # 処理完了)。1 回実行して終了後は inactive になるが、これは正常状態であり
-  # 起動失敗ではない。oneshot の collector のみ active read-back を行わず、
-  # start/restart の exit code と systemctl show(Result / ExecMainStatus)で
-  # 終了を確認する(下記)。exit code 0 だけでは不十分(プロセスが 0 終了しても
-  # CLI 認証 / Hub 送信が失敗している可能性があるため)。
-  # oneshot 判定は配置済み unit の Type を正とする(検証フェーズで
-  # systemd-analyze verify 済み)。env をここで再読しないのは、render 済み
-  # unit と実行時に効く env が食い違う(例: env 変更後未 deploy)場合でも
-  # 起動待ちの挙動を実 unit に合わせて確実にしたいため。
-  # simple 常駐(interval>0)は従来どおり active read-back を要求する。
-  local oneshot=0
   if [[ "$unit" == "${COLLECTOR_SERVICE}.service" ]]; then
-    local unit_type
-    unit_type="$(sed -n 's|^Type=||p' "${SYSTEMD_DIR}/${unit}" 2>/dev/null | head -n1)"
-    if [[ "${unit_type}" == "oneshot" ]]; then
-      oneshot=1
-    fi
+    grep -qx 'Type=simple' "${SYSTEMD_DIR}/${unit}" \
+      || die "${unit} must be Type=simple because the deployed Collector is a resident Agent"
   fi
 
   # enable 状態と active 状態を分離する(Major 3)。
@@ -2245,23 +2392,6 @@ apply_unit_state() {
     log "starting ${unit} (previous state: ${state:-inactive})"
     systemctl start "$unit" \
       || die "start failed for ${unit}: the current symlink already points at the new release. Check 'journalctl -u ${unit}' (roll back the symlink and restart if needed)"
-  fi
-
-  if [[ "$oneshot" == "1" ]]; then
-    # oneshot: Type=oneshot なので start/restart は実処理終了までブロック済み
-    # (exit code 0 は上の `|| die` で検証済み)。ここでは終了後に
-    # Result=success かつ ExecMainStatus=0 であることだけ read-back で
-    # 確認する(poll は不要)。CLI 認証 / Hub 送信の失敗はプロセスが 0 終了
-    # していても ExecMainStatus 非 0 / Result 非 success として検出できる。
-    # 終了後は inactive になるが正常なので active read-back は行わない。
-    local result exec_main_status
-    result="$(systemctl show "$unit" -p Result --value 2>/dev/null || true)"
-    exec_main_status="$(systemctl show "$unit" -p ExecMainStatus --value 2>/dev/null || true)"
-    if [[ "$result" == "success" && "$exec_main_status" == "0" ]]; then
-      log "${unit} is oneshot (COLLECTOR_INTERVAL_SECONDS=0): Result=success ExecMainStatus=0, inactive after exit is normal"
-      return 0
-    fi
-    die "read-back failed: oneshot ${unit} finished with Result=${result:-<unset>} ExecMainStatus=${exec_main_status:-<unset>} (expected Result=success and ExecMainStatus=0; check 'journalctl -u ${unit}' for CLI/auth/Hub send errors)"
   fi
 
   if [[ "$(systemctl is-active "$unit" 2>/dev/null || true)" != "active" ]]; then

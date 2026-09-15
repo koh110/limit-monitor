@@ -1,5 +1,18 @@
 import { expect, test } from 'vite-plus/test'
-import { resolveCorsAllowedOrigins } from './config.js'
+import { resolveCorsAllowedOrigins, resolvePositiveInt } from './config.js'
+
+test('collector trigger interval は正の整数だけを受け付ける', () => {
+  expect(resolvePositiveInt({ raw: undefined, fallback: 60, name: 'INTERVAL' })).toBe(60)
+  expect(resolvePositiveInt({ raw: '15', fallback: 60, name: 'INTERVAL' })).toBe(15)
+  expect(resolvePositiveInt({ raw: '2147483', fallback: 60, name: 'INTERVAL', max: 2147483 })).toBe(
+    2147483
+  )
+  expect(() =>
+    resolvePositiveInt({ raw: '2147484', fallback: 60, name: 'INTERVAL', max: 2147483 })
+  ).toThrow()
+  expect(() => resolvePositiveInt({ raw: '0', fallback: 60, name: 'INTERVAL' })).toThrow()
+  expect(() => resolvePositiveInt({ raw: '-1', fallback: 60, name: 'INTERVAL' })).toThrow()
+})
 
 test('CORS_ALLOWED_ORIGINS はカンマ区切りを trim して配列にする', () => {
   expect(

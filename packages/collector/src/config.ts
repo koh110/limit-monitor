@@ -105,13 +105,6 @@ export const COLLECTOR_MODE = resolveCollectorMode(process.env.COLLECTOR_MODE)
 
 export const PROVIDERS = resolveProviders(process.env.COLLECTOR_PROVIDERS)
 
-// 0 なら 1 回送信して終了する
-export const INTERVAL_SECONDS = resolveNonNegativeInt({
-  raw: process.env.COLLECTOR_INTERVAL_SECONDS,
-  fallback: 0,
-  name: 'COLLECTOR_INTERVAL_SECONDS'
-})
-
 // vendor CLI の実行 path。systemd 配下では PATH が細いため明示指定できるようにする
 export const CLAUDE_BIN = process.env.CLAUDE_BIN ?? 'claude'
 export const CODEX_BIN = process.env.CODEX_BIN ?? 'codex'

@@ -51,6 +51,15 @@ npm run dev:dashboard
 # http://localhost:5173
 ```
 
+Dashboardの実画面を確認してrepositoryのscreenshotを更新:
+
+```bash
+# Hub (127.0.0.1:8787) と Dashboard (127.0.0.1:8788) を起動した状態で実行
+npm run screenshot:dashboard
+```
+
+スクリプトはChromiumで画面を一定時間待ってから、すべてのデータを更新するボタンとデータ描画を確認します。データが表示されない場合は既存の画像を置き換えず失敗します。接続先や出力先を変更する場合は`--url`、`--output`、Chromiumの場所は`--chromium`で指定できます。
+
 Collectorを手動起動する場合は、Hub tokenを環境変数で渡します。
 
 ```bash
@@ -78,7 +87,7 @@ COLLECTOR_MODE=mock HUB_TOKEN=<token> SOURCE_ID=<source-id> \
 
 1. 使用するproviderを決めます。Codex / Claude / Grokを使う場合はCollectorを実行する通常ユーザーで各CLIへloginします。GrokはACP billing APIを利用します。
 2. state directoryをinstall user所有で作成します。
-3. production DBをmigrationし、Hub tokenを発行します。
+3. production DBをmigrationし、Collector tokenを発行します。
 4. 発行されたtokenをroot所有・mode `600`で配置します。
 5. `sudo ./deploy.ts`を、使用するproviderを`--providers`で指定して実行します。build / validation / release配置 / systemd反映はTypeScriptのdeploy処理が行います。
 
@@ -109,6 +118,8 @@ sudo ./deploy.ts \
   --providers codex,claude,grok \
   --hub-base-url http://127.0.0.1:8787
 ```
+
+`--server`を含む初回deployでは、HubとDashboard間のserver-side refresh tokenも自動生成して両方のenvへ保存します。これはブラウザへ埋め込まれず、ブラウザのrefresh requestにBearerを付ける必要もありません。
 
 `collector-token`が未配置、空、symlink、root所有でない、mode `600`でない場合は、deployはunit配置前に停止します。各項目の詳細や既存hostからの移行は[`docs/operations.md`](docs/operations.md)を参照してください。
 
@@ -149,7 +160,7 @@ sudo ./deploy.ts \
 
 Deployを実行した通常ユーザーが、3サービスのsystemd実行ユーザーになります。専用Linux userやgroupは作成しません。`sudo`経由では`SUDO_USER`とprimary groupを自動解決します。rootへ直接loginして実行する場合は拒否されます。
 
-Codex / Claudeをproviderとして選ぶ場合、同じinstallユーザーで対象CLIへlogin済みである必要があります。Grokだけを選択した場合、Codex / Claude CLIはdeploy時に要求されません。tokenや手編集された非管理systemd unitはdeployで黙って上書きしません。
+Codex / Claudeをproviderとして選ぶ場合、同じinstallユーザーで対象CLIへlogin済みである必要があります。Grokだけを選択した場合、Codex / Claude CLIはdeploy時に要求されません。Collector tokenや手編集された非管理systemd unitはdeployで黙って上書きしません。
 
 初回構築は上の「初回構築」を先に実行してください。既存hostの移行、rollback、CORS、systemd状態確認は[`docs/operations.md`](docs/operations.md)を参照してください。
 

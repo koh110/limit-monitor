@@ -5,6 +5,7 @@ type Failure<U = string> = { ok: false; status: number; body: U }
 export type Result<T, U = string> = Success<T> | Failure<U>
 
 export * from './contracts.js'
+export * from './control.js'
 export * from './freshness.js'
 export * from './remaining.js'
 export * from './selection.js'

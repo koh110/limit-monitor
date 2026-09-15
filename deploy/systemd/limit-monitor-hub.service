@@ -3,9 +3,9 @@
 #
 # 配置先と DB path は unit を書き換えずに EnvironmentFile で切り替える:
 #   sudo install -d -m 755 /etc/limit-monitor
-#   sudo install -m 644 deploy/hub.env.example /etc/limit-monitor/hub.env
+#   sudo install -m 640 deploy/hub.env.example /etc/limit-monitor/hub.env
 # ExecStart の引数中の ${INSTALL_DIR} は systemd が展開する。
-# ExecStart の node path(/usr/bin/node)は deploy/deploy.sh --install-systemd が
+# ExecStart の node path(/usr/bin/node)は ./deploy.ts --server が
 # 実行環境の実際 path(command -v node)へ置換して render・配置する。
 # 手動で配置する場合は実 path へ書き換えること。
 [Unit]
@@ -17,7 +17,7 @@ Wants=network-online.target
 Type=simple
 # 実行ユーザーは deploy を実行した通常ユーザー(install user)。
 # limit-monitor 専用の Linux user は作らないし前提にもしない。
-# deploy/deploy.sh --install-systemd が SUDO_USER(sudo 経由)または現在の
+# ./deploy.ts --server が SUDO_USER(sudo 経由)または現在の
 # ユーザーから自動解決した user:group で placeholder を埋めて配置する(利用者に
 # user / group の指定は求めない。root 直接で主体不明なら fail-closed)。
 # 手動で unit を置く場合はここを実アカウントへ書き換える。
@@ -46,7 +46,7 @@ ProtectHome=true
 PrivateTmp=true
 # /var/lib/limit-monitor を上記 User=(= 解決済み install user)の所有・mode 0755 で
 # 用意し、書き込み可能にする。専用ユーザーは作らず、ディレクトリ名だけがアプリ名。
-# deploy/deploy.sh も同じ owner / mode を配置前に検証し、配置後に read-back する。
+# ./deploy.ts --server も同じ owner / mode を配置前に検証し、配置後に read-back する。
 # DB_FILE_PATH をここ以外へ置く場合は drop-in で ReadWritePaths を追加すること
 StateDirectory=limit-monitor
 

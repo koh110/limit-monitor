@@ -2,6 +2,7 @@ import "@typespec/http";
 import "@typespec/openapi";
 import "./typespec/health.tsp";
 import "./typespec/observations.tsp";
+import "./typespec/refresh.tsp";
 import "./typespec/status.tsp";
 
 using Http;
@@ -118,8 +119,8 @@ model ForbiddenResponse {
   @body body: ForbiddenError;
 }
 
-// 404 は個別の operation ではなく app.notFound が返すため response model は持たない。
-// NotFoundError は shape を契約として公開するためだけに宣言している。
+// 404 は個別 operation ではなく app.notFound が返す fallback のため、
+// operation response には紐付けないが、NotFoundResponse で shape と status を契約する。
 
 model ContentTooLargeResponse {
   @statusCode statusCode: 413;
@@ -138,4 +139,9 @@ model TooManyRequestsResponse {
 model InternalServerErrorResponse {
   @statusCode statusCode: 500;
   @body body: InternalServerError;
+}
+
+model NotFoundResponse {
+  @statusCode statusCode: 404;
+  @body body: NotFoundError;
 }

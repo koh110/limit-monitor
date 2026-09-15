@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
-import { expect, test } from 'vite-plus/test'
+import { expect, test, vi } from 'vite-plus/test'
 import { contentTypeOf, createStaticServer, resolveStaticPath } from './static-server.js'
 
 type Response = {
@@ -26,15 +26,19 @@ function createDist() {
 function request({
   port,
   requestPath,
-  method = 'GET'
+  method = 'GET',
+  headers,
+  body
 }: {
   port: number
   requestPath: string
   method?: string
+  headers?: Record<string, string>
+  body?: string
 }) {
   return new Promise<Response>((resolve, reject) => {
     const req = http.request(
-      { host: '127.0.0.1', port, path: requestPath, method },
+      { host: '127.0.0.1', port, path: requestPath, method, headers },
       (res: http.IncomingMessage) => {
         const chunks: Buffer[] = []
         res.on('data', (chunk: Buffer) => {
@@ -50,14 +54,21 @@ function request({
       }
     )
     req.on('error', reject)
-    req.end()
+    req.end(body)
   })
 }
 
 /** 一時 dist を配信する server を起動し、終了時に必ず片付ける */
-async function withServer(run: (port: number) => Promise<void>) {
+async function withServer(
+  run: (port: number) => Promise<void>,
+  options: { hubUrl?: string; hubRefreshToken?: string | null } = {}
+) {
   const distDir = createDist()
-  const server = createStaticServer({ distDir })
+  const server = createStaticServer({
+    distDir,
+    hubUrl: options.hubUrl,
+    hubRefreshToken: options.hubRefreshToken
+  })
   await new Promise<void>((resolve) => {
     server.listen(0, '127.0.0.1', resolve)
   })
@@ -175,6 +186,175 @@ test('HEAD は header だけを返す', async () => {
     expect(res.headers['content-type']).toBe('text/javascript; charset=utf-8')
     expect(res.body).toBe('')
   })
+})
+
+test('Dashboard の same-origin refresh POST は Hub へ server-side Bearer 転送する', async () => {
+  const upstream = vi.fn(async (input: URL, init?: RequestInit) => {
+    expect(input.toString()).toBe('http://hub.test/api/v1/refresh-requests')
+    expect(init?.method).toBe('POST')
+    expect(init?.headers).toEqual({
+      'content-type': 'application/json',
+      Authorization: 'Bearer dashboard-secret'
+    })
+    expect(init?.body).toBe('{"provider":"codex","accountAlias":"main"}')
+    return new Response('{"requestId":"request-1","status":"queued"}', {
+      status: 202,
+      headers: { 'content-type': 'application/json' }
+    })
+  })
+  vi.stubGlobal('fetch', upstream)
+  try {
+    await withServer(
+      async (port) => {
+        const response = await request({
+          port,
+          requestPath: '/api/v1/refresh-requests',
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            origin: `http://127.0.0.1:${port}`
+          },
+          body: '{"provider":"codex","accountAlias":"main"}'
+        })
+        expect(response.status).toBe(202)
+        expect(response.body).toContain('request-1')
+      },
+      { hubUrl: 'http://hub.test', hubRefreshToken: 'dashboard-secret' }
+    )
+  } finally {
+    vi.unstubAllGlobals()
+  }
+})
+
+test('他サイトからの refresh POST は Hub へ送らず接続を切る', async () => {
+  const upstream = vi.fn()
+  vi.stubGlobal('fetch', upstream)
+  try {
+    await withServer(
+      async (port) => {
+        await expect(
+          request({
+            port,
+            requestPath: '/api/v1/refresh-requests',
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              origin: 'http://evil.example'
+            },
+            body: '{"provider":"codex","accountAlias":"main"}'
+          })
+        ).rejects.toThrow()
+        expect(upstream).not.toHaveBeenCalled()
+      },
+      { hubUrl: 'http://hub.test', hubRefreshToken: 'dashboard-secret' }
+    )
+  } finally {
+    vi.unstubAllGlobals()
+  }
+})
+
+test('Origin と Sec-Fetch-Site がない refresh POST は Hub へ送らず接続を切る', async () => {
+  const upstream = vi.fn()
+  vi.stubGlobal('fetch', upstream)
+  try {
+    await withServer(
+      async (port) => {
+        await expect(
+          request({
+            port,
+            requestPath: '/api/v1/refresh-requests',
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: '{}'
+          })
+        ).rejects.toThrow()
+        expect(upstream).not.toHaveBeenCalled()
+      },
+      { hubUrl: 'http://hub.test', hubRefreshToken: 'dashboard-secret' }
+    )
+  } finally {
+    vi.unstubAllGlobals()
+  }
+})
+
+test('refresh body が上限を超えると header を送らず接続を切る', async () => {
+  const upstream = vi.fn()
+  vi.stubGlobal('fetch', upstream)
+  try {
+    await withServer(
+      async (port) => {
+        await expect(
+          request({
+            port,
+            requestPath: '/api/v1/refresh-requests',
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              origin: `http://127.0.0.1:${port}`
+            },
+            body: JSON.stringify({
+              provider: 'codex',
+              accountAlias: 'main',
+              padding: 'x'.repeat(8 * 1024)
+            })
+          })
+        ).rejects.toThrow()
+        expect(upstream).not.toHaveBeenCalled()
+      },
+      { hubUrl: 'http://hub.test', hubRefreshToken: 'dashboard-secret' }
+    )
+  } finally {
+    vi.unstubAllGlobals()
+  }
+})
+
+test('JSON でない refresh body は 400 で Hub へ送らない', async () => {
+  const upstream = vi.fn()
+  vi.stubGlobal('fetch', upstream)
+  try {
+    await withServer(
+      async (port) => {
+        const response = await request({
+          port,
+          requestPath: '/api/v1/refresh-requests',
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            origin: `http://127.0.0.1:${port}`
+          },
+          body: 'not-json'
+        })
+        expect(response.status).toBe(400)
+        expect(upstream).not.toHaveBeenCalled()
+      },
+      { hubUrl: 'http://hub.test', hubRefreshToken: 'dashboard-secret' }
+    )
+  } finally {
+    vi.unstubAllGlobals()
+  }
+})
+
+test('Dashboard proxy は token 未設定時にHubへ送らず503を返す', async () => {
+  const upstream = vi.fn()
+  vi.stubGlobal('fetch', upstream)
+  try {
+    await withServer(
+      async (port) => {
+        const response = await request({
+          port,
+          requestPath: '/api/v1/refresh-requests',
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: '{}'
+        })
+        expect(response.status).toBe(503)
+        expect(upstream).not.toHaveBeenCalled()
+      },
+      { hubUrl: 'http://hub.test', hubRefreshToken: null }
+    )
+  } finally {
+    vi.unstubAllGlobals()
+  }
 })
 
 test('resolveStaticPath は root 配下だけを返す', () => {

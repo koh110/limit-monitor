@@ -7,8 +7,11 @@ import {
   atomicWriteTextFile,
   readEnvFile,
   readEnvValue,
+  removeEnvKeys,
   renderCollectorProviders,
-  renderEnvUpdates
+  renderEnvUpdates,
+  prepareRefreshTokenEnvs,
+  ensureSecretEnvFileMode
 } from './env.ts'
 import { type CommandRunner, type InstallIdentity, runAsUser, runCommand } from './exec.ts'
 
@@ -40,7 +43,6 @@ type PreparedConfig = {
   envs: Partial<Record<'hub' | 'dashboard' | 'collector', string>>
   envDestinations: Partial<Record<'hub' | 'dashboard' | 'collector', string>>
   units: Map<string, string>
-  collectorOneshot: boolean
 }
 
 const NEW_MANAGED_UNIT_MARKER =
@@ -53,7 +55,8 @@ const REQUIRED_BUILD_ARTIFACTS = [
   'packages/shared/dist/src/index.js',
   'packages/hub/dist/src/index.js',
   'packages/hub/dist/src/features/tokens/store.js',
-  'packages/collector/dist/src/index.js',
+  'packages/collector/dist/src/agent.js',
+  'packages/collector/dist/src/worker.js',
   'packages/client/dist/public/index.html',
   'packages/client/dist/server/index.js',
   'packages/client/dist/server/static-server.js'
@@ -291,13 +294,23 @@ function readExample(repoRoot: string, name: 'hub' | 'dashboard' | 'collector'):
   return fs.readFileSync(path.join(repoRoot, 'deploy', `${name}.env.example`), 'utf8')
 }
 
-function envSource(
+function readExistingEnvFile(file: string): string | undefined {
+  try {
+    return readEnvFile(file)
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return undefined
+    throw error
+  }
+}
+
+export function envSource(
   dest: string,
   example: string,
   installDir: string
 ): { content: string; existing: boolean } {
-  if (fs.existsSync(dest)) {
-    const content = readEnvFile(dest)
+  const existingContent = readExistingEnvFile(dest)
+  if (existingContent !== undefined) {
+    const content = existingContent
     assertNoDuplicateEnvKeys(content, dest)
     const configured = readEnvValue(content, 'INSTALL_DIR') ?? ''
     if (configured !== installDir) {
@@ -441,12 +454,8 @@ function validateCollectorEnv(
   identity: InstallIdentity,
   content: string,
   label: string
-): { providers: DeployProvider[]; oneshot: boolean } {
+): { providers: DeployProvider[] } {
   assertNoDuplicateEnvKeys(content, label)
-  const intervalRaw = (readEnvValue(content, 'COLLECTOR_INTERVAL_SECONDS') ?? '60').trim()
-  if (!/^[0-9]+$/.test(intervalRaw)) {
-    deployError(`COLLECTOR_INTERVAL_SECONDS must be a non-negative integer in ${label}`)
-  }
   const mode = readEnvValue(content, 'COLLECTOR_MODE') ?? 'real'
   if (mode !== 'real' && mode !== 'mock') {
     deployError(`COLLECTOR_MODE must be 'real' or 'mock' in ${label} (got: ${mode})`)
@@ -464,10 +473,10 @@ function validateCollectorEnv(
       }
     }
   }
-  return { providers, oneshot: Number(intervalRaw) === 0 }
+  return { providers }
 }
 
-function prepareCollectorEnv(
+export function prepareCollectorEnv(
   runner: CommandRunner,
   identity: InstallIdentity,
   repoRoot: string,
@@ -475,9 +484,12 @@ function prepareCollectorEnv(
   installDir: string,
   selected: readonly DeployProvider[] | undefined,
   env: NodeJS.ProcessEnv
-): { content: string; existing: boolean; oneshot: boolean } {
+): { content: string; existing: boolean } {
   const source = envSource(dest, readExample(repoRoot, 'collector'), installDir)
   let content = source.content
+  if (source.existing) {
+    content = removeEnvKeys(content, ['COLLECTOR_INTERVAL_SECONDS'], 'collector.env')
+  }
   if (selected !== undefined) content = renderCollectorProviders(content, selected)
   const effectiveProviders = parseProvidersFromEnv(content, dest)
   const updates: Record<string, string> = {}
@@ -493,16 +505,15 @@ function prepareCollectorEnv(
     updates.GROK_BIN = resolveInitialCli(runner, identity, 'GROK_BIN', 'grok', env)
   }
   if (Object.keys(updates).length > 0) content = renderEnvUpdates(content, updates, 'collector.env')
-  const validated = validateCollectorEnv(runner, identity, content, dest)
-  return { content, existing: source.existing, oneshot: validated.oneshot }
+  validateCollectorEnv(runner, identity, content, dest)
+  return { content, existing: source.existing }
 }
 
 function renderUnit(
   template: string,
   unitName: string,
   nodeBin: string,
-  identity: InstallIdentity,
-  collectorOneshot: boolean
+  identity: InstallIdentity
 ): string {
   const userMatches = template.match(/^User=CHANGE_ME$/gm) ?? []
   const groupMatches = template.match(/^Group=CHANGE_ME$/gm) ?? []
@@ -513,9 +524,6 @@ function renderUnit(
     .replace(/^ExecStart=\/usr\/bin\/node /m, `ExecStart=${nodeBin} `)
     .replace(/^User=CHANGE_ME$/m, `User=${identity.user}`)
     .replace(/^Group=CHANGE_ME$/m, `Group=${identity.group}`)
-  if (unitName === 'limit-monitor-collector.service') {
-    rendered = rendered.replace(/^Type=.*$/m, `Type=${collectorOneshot ? 'oneshot' : 'simple'}`)
-  }
   if (/^(User|Group)=CHANGE_ME$/m.test(rendered)) {
     deployError(`${unitName} still contains CHANGE_ME placeholder`)
   }
@@ -593,7 +601,6 @@ function prepareConfig(
 ): PreparedConfig {
   const envs: PreparedConfig['envs'] = {}
   const envDestinations: PreparedConfig['envDestinations'] = {}
-  let collectorOneshot = false
 
   if (request.services.includes('server')) {
     const hubDest = path.join(paths.etcDir, 'hub.env')
@@ -604,9 +611,11 @@ function prepareConfig(
       readExample(request.repoRoot, 'dashboard'),
       paths.installDir
     )
+    const refresh = prepareRefreshTokenEnvs(hub.content, dashboard.content)
     const origin = dashboardOrigin(dashboard.content, dashboardDest)
-    envs.hub = syncHubCors(hub.content, origin, hubDest)
-    envs.dashboard = dashboard.content
+    envs.hub = syncHubCors(refresh.hub, origin, hubDest)
+    envs.dashboard = refresh.dashboard
+    if (refresh.generated) log('generated a shared Hub/Dashboard refresh token')
     envDestinations.hub = hubDest
     envDestinations.dashboard = dashboardDest
     validateStateDir(paths, identity)
@@ -625,7 +634,7 @@ function prepareConfig(
     )
     envs.collector = collector.content
     envDestinations.collector = collectorDest
-    collectorOneshot = collector.oneshot
+
     validateCollectorToken(paths)
   }
 
@@ -635,7 +644,7 @@ function prepareConfig(
       path.join(request.repoRoot, 'deploy', 'systemd', unitName),
       'utf8'
     )
-    const rendered = renderUnit(template, unitName, nodeBin, identity, collectorOneshot)
+    const rendered = renderUnit(template, unitName, nodeBin, identity)
     if (unitName === 'limit-monitor-collector.service') {
       const tokenPath = path.join(paths.etcDir, 'collector-token')
       const expected = `LoadCredential=hub-token:${tokenPath}`
@@ -661,7 +670,7 @@ function prepareConfig(
     log(`validated ${unitName}`)
   }
 
-  return { identity, nodeBin, envs, envDestinations, units, collectorOneshot }
+  return { identity, nodeBin, envs, envDestinations, units }
 }
 
 function placeStateDir(
@@ -711,10 +720,12 @@ function placeConfig(
   if (request.services.includes('server')) {
     const hubDest = prepared.envDestinations.hub!
     const dashboardDest = prepared.envDestinations.dashboard!
-    atomicWriteTextFile(hubDest, prepared.envs.hub!, 0o644)
-    if (!fs.existsSync(dashboardDest)) {
-      atomicWriteTextFile(dashboardDest, prepared.envs.dashboard!, 0o644)
-    }
+    ensureSecretEnvFileMode(hubDest)
+    ensureSecretEnvFileMode(dashboardDest)
+    atomicWriteTextFile(hubDest, prepared.envs.hub!, 0o640)
+    atomicWriteTextFile(dashboardDest, prepared.envs.dashboard!, 0o640)
+    ensureSecretEnvFileMode(hubDest)
+    ensureSecretEnvFileMode(dashboardDest)
   }
 
   if (request.services.includes('collector')) {
@@ -780,12 +791,7 @@ function unitIsActive(runner: CommandRunner, unit: string): boolean {
   return runner('systemctl', ['is-active', unit], { allowFailure: true }).stdout.trim() === 'active'
 }
 
-function applyUnit(
-  runner: CommandRunner,
-  unit: string,
-  oneshot: boolean,
-  log: (message: string) => void
-): void {
+function applyUnit(runner: CommandRunner, unit: string, log: (message: string) => void): void {
   log(`enabling ${unit}`)
   runner('systemctl', ['enable', unit])
   const enabled = runner('systemctl', ['is-enabled', '--quiet', unit], { allowFailure: true })
@@ -794,20 +800,6 @@ function applyUnit(
   if (unitIsActive(runner, unit)) runner('systemctl', ['restart', unit])
   else runner('systemctl', ['start', unit])
 
-  if (oneshot) {
-    const result = runner('systemctl', ['show', unit, '-p', 'Result', '--value']).stdout.trim()
-    const status = runner('systemctl', [
-      'show',
-      unit,
-      '-p',
-      'ExecMainStatus',
-      '--value'
-    ]).stdout.trim()
-    if (result !== 'success' || status !== '0') {
-      deployError(`oneshot ${unit} failed: Result=${result} ExecMainStatus=${status}`)
-    }
-    return
-  }
   if (!unitIsActive(runner, unit)) deployError(`read-back failed: ${unit} is not active`)
 }
 
@@ -851,7 +843,7 @@ function startServices(
 ): void {
   runner('systemctl', ['daemon-reload'])
   if (request.services.includes('server')) {
-    applyUnit(runner, 'limit-monitor-hub.service', false, log)
+    applyUnit(runner, 'limit-monitor-hub.service', log)
     waitForHubReady(
       runner,
       prepared.envs.hub!,
@@ -862,10 +854,10 @@ function startServices(
       ),
       log
     )
-    applyUnit(runner, 'limit-monitor-dashboard.service', false, log)
+    applyUnit(runner, 'limit-monitor-dashboard.service', log)
   }
   if (request.services.includes('collector')) {
-    applyUnit(runner, 'limit-monitor-collector.service', prepared.collectorOneshot, log)
+    applyUnit(runner, 'limit-monitor-collector.service', log)
   }
 }
 

@@ -1,24 +1,30 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import type * as schema from 'shared/src/schema'
-import { CORS_ALLOWED_ORIGINS, INGEST_RATE_LIMIT } from './config.js'
+import { CORS_ALLOWED_ORIGINS, HUB_REFRESH_TOKEN, INGEST_RATE_LIMIT } from './config.js'
 import type { Db } from './lib/database.js'
 import { accessLogMiddleware } from './lib/middleware.js'
 import type { RateLimiter } from './lib/rate-limit.js'
 import { createRateLimiter } from './lib/rate-limit.js'
 import { handleError } from './lib/wrap.js'
+import { createControlRegistry } from './features/control.js'
 import * as health from './handlers/health/index.js'
 import * as observations from './handlers/observations/index.js'
 import * as status from './handlers/status/index.js'
+import * as refresh from './handlers/refresh/index.js'
 
 export function createApp({
   db,
   rateLimiter = createRateLimiter(INGEST_RATE_LIMIT),
-  corsAllowedOrigins = CORS_ALLOWED_ORIGINS
+  corsAllowedOrigins = CORS_ALLOWED_ORIGINS,
+  controlRegistry = createControlRegistry(),
+  refreshApiToken = HUB_REFRESH_TOKEN
 }: {
   db: Db
   rateLimiter?: RateLimiter
   corsAllowedOrigins?: string | string[]
+  controlRegistry?: ReturnType<typeof createControlRegistry>
+  refreshApiToken?: string | null
 }) {
   const app = new Hono()
   app.use(accessLogMiddleware())
@@ -42,6 +48,7 @@ export function createApp({
   health.createRoute(app, db)
   status.createRoute(app, db)
   observations.createRoute(app, db, rateLimiter)
+  refresh.createRoute(app, db, controlRegistry, refreshApiToken)
 
   return app
 }

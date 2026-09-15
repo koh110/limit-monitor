@@ -24,13 +24,6 @@ Wants=network-online.target limit-monitor-hub.service
 # 保つ(Requires= で Hub 不在時に collector も起動できなくなるのを避ける)。
 
 [Service]
-# Type=simple は安全な既定値(手動配置のデフォルト): 既定
-# COLLECTOR_INTERVAL_SECONDS=60(常駐送信)では systemctl start が即 return し、
-# is-active=active を確認できる。oneshot mode(interval=0)では deploy.ts が env の
-# interval に基づいて Type=oneshot へ render する(start / restart が実処理終了まで
-# ブロックし、返却後に Result=success / ExecMainStatus=0 を確認できる)。配置済み
-# unit は render 結果を正とする(手動で Type を入れ替えないこと。deploy は
-# systemd-analyze verify で検証し、失敗時は current を切替えない)。
 Type=simple
 # Codex/Claude に login しているアカウント(= deploy を実行した install user)へ
 # 置き換える。limit-monitor 専用の Linux user は作らないし前提にもしない。
@@ -47,7 +40,6 @@ Environment=HUB_URL=http://127.0.0.1:8787
 # 既定は real。fixture 送信は COLLECTOR_MODE=mock を明示した場合だけ
 Environment=COLLECTOR_MODE=real
 Environment=SOURCE_ID=dev-machine
-Environment=COLLECTOR_INTERVAL_SECONDS=60
 EnvironmentFile=-/etc/limit-monitor/collector.env
 
 # token file は root:root mode 600 のまま置く。systemd(PID 1 = root)が読み、
@@ -57,10 +49,7 @@ LoadCredential=hub-token:/etc/limit-monitor/collector-token
 Environment=HUB_TOKEN_FILE=%d/hub-token
 
 WorkingDirectory=/
-ExecStart=/usr/bin/node ${INSTALL_DIR}/current/packages/collector/dist/src/index.js
-# on-failure にする: COLLECTOR_INTERVAL_SECONDS=0 の oneshot は成功時 0 終了で
-# 終わり、systemd が再実行すると「1 回だけ送信」の契約と矛盾する。
-# 常駐でもクラッシュ(非 0 終了 / signal)時のみ再試行したい。
+ExecStart=/usr/bin/node ${INSTALL_DIR}/current/packages/collector/dist/src/agent.js
 Restart=on-failure
 RestartSec=30
 

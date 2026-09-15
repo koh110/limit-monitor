@@ -16,6 +16,11 @@ import {
   observationSchema,
   statusResponseSchema
 } from './contracts.js'
+import {
+  type RefreshRequestBody,
+  type RefreshRequestResponse,
+  type RefreshStatus
+} from './control.js'
 import type { components } from './generated/schema.js'
 
 type Schemas = components['schemas']
@@ -62,6 +67,24 @@ const statusResponse = assertMutuallyAssignable<StatusResponse, Schemas['StatusR
   (value) => value,
   (value) => value
 )
+const refreshStatus = assertMutuallyAssignable<RefreshStatus, Schemas['RefreshStatus']>(
+  (value) => value,
+  (value) => value
+)
+const refreshRequestBody = assertMutuallyAssignable<
+  RefreshRequestBody,
+  Schemas['RefreshRequestBody']
+>(
+  (value) => value,
+  (value) => value
+)
+const refreshRequestResponse = assertMutuallyAssignable<
+  RefreshRequestResponse,
+  Schemas['RefreshRequestResponse']
+>(
+  (value) => value,
+  (value) => value
+)
 
 test('TypeSpec 生成型と zod 契約型は相互に代入できる', () => {
   expect([
@@ -72,8 +95,11 @@ test('TypeSpec 生成型と zod 契約型は相互に代入できる', () => {
     ingestResult,
     statusBucket,
     statusAccount,
-    statusResponse
-  ]).toHaveLength(8)
+    statusResponse,
+    refreshStatus,
+    refreshRequestBody,
+    refreshRequestResponse
+  ]).toHaveLength(11)
 })
 
 test('TypeSpec の Observation 形状は zod の runtime 検証を通る', () => {

@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc --build tsconfig.json",
-    "start": "node dist/src/index.js",
+    "start": "node dist/src/agent.js",
     "tsc": "tsc --build tsconfig.test.json",
     "vitest": "vp test --config=./vite.config.ts",
     "test": "npm run tsc && npm run test-ci",
@@ -15,10 +15,12 @@
     "lint-fix": "vp lint src --fix"
   },
   "dependencies": {
+    "ws": "^8.21.3",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^25.9.5",
+    "@types/ws": "^8.18.1",
     "concurrently": "^9.2.4",
     "typescript": "^6.0.3"
   }

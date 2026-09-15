@@ -10,8 +10,45 @@ export const DB_FILE_PATH = process.env.DB_FILE_PATH ?? './data/limit-monitor.sq
 
 export const APP_VERSION = '0.1.0' as const
 
+export const NODE_TIMER_MAX_MS = 2_147_483_647
+export const MAX_COLLECTOR_TRIGGER_INTERVAL_SECONDS = Math.floor(NODE_TIMER_MAX_MS / 1000)
+
+export function resolvePositiveInt({
+  raw,
+  fallback,
+  name,
+  max = Number.MAX_SAFE_INTEGER
+}: {
+  raw: string | undefined
+  fallback: number
+  name: string
+  max?: number
+}) {
+  const value = raw === undefined || raw.trim() === '' ? fallback : Number(raw)
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`${name} must be a positive integer`)
+  }
+  if (value > max) {
+    throw new Error(`${name} must be <= ${max}`)
+  }
+  return value
+}
+
+export const COLLECTOR_TRIGGER_INTERVAL_MS =
+  resolvePositiveInt({
+    raw: process.env.COLLECTOR_TRIGGER_INTERVAL_SECONDS,
+    fallback: 60,
+    name: 'COLLECTOR_TRIGGER_INTERVAL_SECONDS',
+    max: MAX_COLLECTOR_TRIGGER_INTERVAL_SECONDS
+  }) * 1000
+
+export const HUB_REFRESH_TOKEN = process.env.HUB_REFRESH_TOKEN?.trim() || null
+
 // Ingest のリクエストボディ上限(仕様 7.2「リクエストボディ上限を小さく設定する」)
 export const INGEST_BODY_LIMIT_BYTES = 32 * 1024
+
+// 手動 refresh は固定小サイズのJSONだけを受け付ける
+export const REFRESH_BODY_LIMIT_BYTES = 8 * 1024
 
 // Ingest の in-memory rate limit(fixed window)
 export const INGEST_RATE_LIMIT = {

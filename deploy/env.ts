@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -7,6 +8,8 @@ export class DeployConfigError extends Error {
     this.name = 'DeployConfigError'
   }
 }
+
+const REFRESH_TOKEN_PLACEHOLDER = 'replace-with-a-random-service-token'
 
 type Assignment = {
   key: string
@@ -57,6 +60,93 @@ export function readEnvValue(content: string, key: string): string | undefined {
   return envAssignments(content).find((assignment) => assignment.key === key)?.value
 }
 
+function configuredRefreshToken(content: string): string | undefined {
+  const value = (readEnvValue(content, 'HUB_REFRESH_TOKEN') ?? '').trim()
+  if (value === '' || value === REFRESH_TOKEN_PLACEHOLDER) return undefined
+  return value
+}
+
+function generateRefreshToken(): string {
+  return randomBytes(32).toString('hex')
+}
+
+/**
+ * HubとDashboardのserver-side refresh tokenを解決する。
+ *
+ * 両方が未設定またはexample placeholderなら、新しいtokenを一度だけ生成する。
+ * 片側だけ設定済みなら既存値をもう片側へ反映し、両側の実値が異なる場合は
+ * token単独では扱わず、配置対象envの内容にのみ反映する。
+ */
+export function prepareRefreshTokenEnvs(
+  hubContent: string,
+  dashboardContent: string,
+  tokenGenerator: () => string = generateRefreshToken
+): { hub: string; dashboard: string; generated: boolean } {
+  const hubToken = configuredRefreshToken(hubContent)
+  const dashboardToken = configuredRefreshToken(dashboardContent)
+
+  if (hubToken !== undefined && dashboardToken !== undefined) {
+    if (hubToken !== dashboardToken) {
+      throw new DeployConfigError('HUB_REFRESH_TOKEN differs between hub and dashboard env')
+    }
+    return { hub: hubContent, dashboard: dashboardContent, generated: false }
+  }
+
+  const candidateToken = hubToken ?? dashboardToken ?? tokenGenerator()
+  if (candidateToken.includes('\n') || candidateToken.includes('\r')) {
+    throw new DeployConfigError('generated HUB_REFRESH_TOKEN must be a non-empty single-line value')
+  }
+  const token = candidateToken.trim()
+  if (token === '' || token === REFRESH_TOKEN_PLACEHOLDER) {
+    throw new DeployConfigError('generated HUB_REFRESH_TOKEN must be a non-empty single-line value')
+  }
+
+  return {
+    hub:
+      hubToken === undefined
+        ? renderEnvUpdates(hubContent, { HUB_REFRESH_TOKEN: token }, 'hub.env')
+        : hubContent,
+    dashboard:
+      dashboardToken === undefined
+        ? renderEnvUpdates(dashboardContent, { HUB_REFRESH_TOKEN: token }, 'dashboard.env')
+        : dashboardContent,
+    generated: hubToken === undefined && dashboardToken === undefined
+  }
+}
+
+/**
+ * refresh tokenを保存するenvのmodeを安全側へ寄せる。
+ * owner readが無い、group writeがある、またはother bitがある場合は0600にする。
+ * 既存の640/600等は変更しない。存在しないファイルは配置処理に委ねる。
+ */
+export function ensureSecretEnvFileMode(file: string): void {
+  let stat: fs.Stats
+  try {
+    stat = fs.lstatSync(file)
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return
+    throw error
+  }
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    throw new DeployConfigError(`secret env path must be a regular non-symlink file: ${file}`)
+  }
+  const mode = stat.mode & 0o777
+  const secure = (mode & 0o400) !== 0 && (mode & 0o007) === 0 && (mode & 0o020) === 0
+  if (!secure) fs.chmodSync(file, 0o600)
+
+  const verified = fs.lstatSync(file)
+  const verifiedMode = verified.mode & 0o777
+  if (
+    !verified.isFile() ||
+    verified.isSymbolicLink() ||
+    (verifiedMode & 0o400) === 0 ||
+    (verifiedMode & 0o007) !== 0 ||
+    (verifiedMode & 0o020) !== 0
+  ) {
+    throw new DeployConfigError(`secret env mode verification failed: ${file}`)
+  }
+}
+
 export function renderEnvUpdates(
   content: string,
   updates: Readonly<Record<string, string>>,
@@ -92,6 +182,29 @@ export function renderCollectorProviders(content: string, providers: readonly st
     throw new DeployConfigError('collector providers must not be empty')
   }
   return renderEnvUpdates(content, { COLLECTOR_PROVIDERS: providers.join(',') }, 'collector.env')
+}
+
+export function removeEnvKeys(
+  content: string,
+  keys: readonly string[],
+  label = 'env file'
+): string {
+  assertNoDuplicateEnvKeys(content, label)
+  for (const key of keys) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+      throw new DeployConfigError(`invalid env key: ${key}`)
+    }
+  }
+
+  const remove = new Set(keys)
+  const { lines, trailingNewline } = splitLines(content)
+  const removeIndexes = new Set(
+    envAssignments(content)
+      .filter((assignment) => remove.has(assignment.key))
+      .map((assignment) => assignment.lineIndex)
+  )
+  const rendered = lines.filter((_, index) => !removeIndexes.has(index)).join('\n')
+  return trailingNewline || rendered.length > 0 ? `${rendered}\n` : rendered
 }
 
 export function readEnvFile(file: string): string {
