@@ -1,3 +1,4 @@
+import { observationBucketSchema } from 'shared/src/contracts'
 import { expect, test } from 'vite-plus/test'
 import { buildCodexObservation } from './codex.js'
 
@@ -64,6 +65,62 @@ test('rateLimitsByLimitId の全 limit・全 window を bucket にする', () =>
       reached: false
     }
   ])
+})
+
+test('同じ期間の異なる limit は識別子付きラベルで区別する', () => {
+  const observation = buildCodexObservation({
+    ...base,
+    payload: {
+      rateLimitsByLimitId: {
+        base_model_inference: {
+          limitId: 'base_model_inference',
+          limitName: 'gpt-reserve',
+          primary: { usedPercent: 0, windowDurationMins: 10080 }
+        },
+        codex: {
+          limitId: 'codex',
+          primary: { usedPercent: 0, windowDurationMins: 300 },
+          secondary: { usedPercent: 93, windowDurationMins: 10080 }
+        }
+      }
+    }
+  })
+
+  expect(observation?.buckets).toEqual([
+    expect.objectContaining({
+      bucketId: 'codex:base_model_inference:primary',
+      label: '7d (gpt-reserve)'
+    }),
+    expect.objectContaining({ bucketId: 'codex:codex:primary', label: '5h' }),
+    expect.objectContaining({ bucketId: 'codex:codex:secondary', label: '7d (codex)' })
+  ])
+})
+
+test('長い limit 名を切り詰めても同じ期間のラベルは重複しない', () => {
+  const observation = buildCodexObservation({
+    ...base,
+    payload: {
+      rateLimitsByLimitId: {
+        first: {
+          limitId: 'first',
+          limitName: 'abcdefghijklmnopqrstuvwxyz123456-A',
+          primary: { usedPercent: 0, windowDurationMins: 10080 }
+        },
+        second: {
+          limitId: 'second',
+          limitName: 'abcdefghijklmnopqrstuvwxyz123456-B',
+          primary: { usedPercent: 0, windowDurationMins: 10080 }
+        }
+      }
+    }
+  })
+  const labels = observation?.buckets.map((bucket) => {
+    return observationBucketSchema.parse(bucket).label
+  })
+
+  expect(labels).toHaveLength(2)
+  expect(new Set(labels).size).toBe(2)
+  expect(labels?.every((label) => label.length <= 32)).toBe(true)
 })
 
 test('rateLimitsByLimitId がなければ単一 rateLimits を扱う(secondary なし)', () => {
