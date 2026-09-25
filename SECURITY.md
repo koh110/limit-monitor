@@ -41,6 +41,8 @@ Hub へ送信してよいのは正規化された数値情報のみ:
 
 ## Secret の取り扱い
 
+Claude collector は Claude Code が保存した credentials から OAuth access token と必要な refresh token を一時的に読み、Anthropic の usage/token endpoint にだけ使う。credentials file は実行ユーザー所有・owner-readableかつ mode `600` 相当であることを要求する。token は Hub payload・usage cache・ログへ入れず、refresh時の credentials 更新は mode `600`の一時ファイルからatomicな no-replace swapで行い、専用lock・内容fingerprint・inode guardで同時更新を検知する。
+
 - token・秘密情報をリポジトリへ commit しない(`.env` は `.gitignore` 済み)
 - 長期運用では systemd credentials(`LoadCredential`)または 1Password CLI を利用する
 - ログに token、vendor response 全文、認証情報を出力しない

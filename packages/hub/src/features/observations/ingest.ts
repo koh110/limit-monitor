@@ -12,6 +12,11 @@ type IngestResponse = IngestApi['responses']
 type Observation = IngestApi['requestBody']['content']['application/json']
 type IngestResult = IngestResponse['200']['content']['application/json']
 
+function legacyClaudeWeekAlias(bucketId: string): string | null {
+  const match = /^claude:week:(.+)-([0-9a-f]{32})$/.exec(bucketId)
+  return match?.[1] ? `claude:week:${match[1]}` : null
+}
+
 export async function ingestObservation({
   db,
   observation,
@@ -71,9 +76,23 @@ export async function ingestObservation({
     bucketsById.set(parsed.data.bucketId, parsed.data)
   }
 
-  const receivedAt = now.toISOString()
   const candidates = [...bucketsById.values()]
+  const legacyAliasesByBucketId = new Map(
+    candidates.map((bucket) => [
+      bucket.bucketId,
+      observation.provider === 'claude' ? legacyClaudeWeekAlias(bucket.bucketId) : null
+    ])
+  )
 
+  const receivedAt = now.toISOString()
+  const lookupBucketIds = [
+    ...new Set(
+      candidates.flatMap((bucket) => {
+        const alias = legacyAliasesByBucketId.get(bucket.bucketId)
+        return alias ? [bucket.bucketId, alias] : [bucket.bucketId]
+      })
+    )
+  ]
   const existingRows =
     candidates.length > 0
       ? await db
@@ -87,12 +106,7 @@ export async function ingestObservation({
             and(
               eq(latestLimits.provider, observation.provider),
               eq(latestLimits.accountAlias, accountAlias),
-              inArray(
-                latestLimits.bucketId,
-                candidates.map((bucket) => {
-                  return bucket.bucketId
-                })
-              )
+              inArray(latestLimits.bucketId, lookupBucketIds)
             )
           )
       : []
@@ -104,6 +118,7 @@ export async function ingestObservation({
 
   const skipped: IngestResult['skipped'] = []
   const accepted: IngestResult['accepted'] = []
+  const acceptedBuckets: ObservationBucket[] = []
   const rowsToWrite: (typeof latestLimits.$inferInsert)[] = []
   for (const bucket of candidates) {
     const existing = existingByBucketId.get(bucket.bucketId)
@@ -114,6 +129,7 @@ export async function ingestObservation({
       continue
     }
     accepted.push(bucket.bucketId)
+    acceptedBuckets.push(bucket)
     rowsToWrite.push({
       provider: observation.provider,
       accountAlias,
@@ -128,6 +144,29 @@ export async function ingestObservation({
       sourceId,
       reached: bucket.reached ?? false
     })
+  }
+
+  const legacyBucketIdsToDelete = [
+    ...new Set(
+      acceptedBuckets.flatMap((bucket) => {
+        const alias = legacyAliasesByBucketId.get(bucket.bucketId)
+        if (!alias) return []
+        const existingLegacy = existingByBucketId.get(alias)
+        const incoming = { observedAt: observation.observedAt, receivedAt }
+        return !existingLegacy || shouldReplaceLatest(existingLegacy, incoming) ? [alias] : []
+      })
+    )
+  ]
+  if (legacyBucketIdsToDelete.length > 0) {
+    await db
+      .delete(latestLimits)
+      .where(
+        and(
+          eq(latestLimits.provider, observation.provider),
+          eq(latestLimits.accountAlias, accountAlias),
+          inArray(latestLimits.bucketId, legacyBucketIdsToDelete)
+        )
+      )
   }
 
   if (rowsToWrite.length > 0) {

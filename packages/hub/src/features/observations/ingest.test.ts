@@ -317,3 +317,54 @@ test('payload の accountAlias が token の accountAlias と一致しない場�
   expect(await statusBuckets(db)).toEqual([])
   cleanup()
 })
+
+test('Claude canonical week bucket は既存の legacy alias を受信時に移行する', async () => {
+  const { db, cleanup } = createTestDb()
+  await ingestObservation({
+    db,
+    observation: createObservation({
+      provider: 'claude',
+      observedAt: '2026-08-23T04:00:00.000Z',
+      buckets: [
+        {
+          bucketId: 'claude:week:sonnet',
+          label: '7d Sonnet',
+          usedPercent: 8,
+          remainingPercent: 92,
+          windowDurationSeconds: 604800,
+          resetsAt: '2026-08-29T04:00:00.000Z',
+          reached: false
+        }
+      ]
+    }),
+    tokenSourceId: 'dev-machine',
+    tokenAccountAlias: 'default',
+    now
+  })
+  await ingestObservation({
+    db,
+    observation: createObservation({
+      provider: 'claude',
+      observedAt: '2026-08-23T04:01:00.000Z',
+      buckets: [
+        {
+          bucketId: 'claude:week:sonnet-1ade9c81caebe6abda520fac695bac2c',
+          label: '7d Sonnet',
+          usedPercent: 12,
+          remainingPercent: 88,
+          windowDurationSeconds: 604800,
+          resetsAt: '2026-08-29T04:00:00.000Z',
+          reached: false
+        }
+      ]
+    }),
+    tokenSourceId: 'dev-machine',
+    tokenAccountAlias: 'default',
+    now
+  })
+  const rows = await db.select({ bucketId: latestLimits.bucketId }).from(latestLimits)
+  expect(rows.map((row) => row.bucketId)).toEqual([
+    'claude:week:sonnet-1ade9c81caebe6abda520fac695bac2c'
+  ])
+  cleanup()
+})

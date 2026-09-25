@@ -9,12 +9,13 @@
 # ExecStart の node path(/usr/bin/node)は deploy.ts が実行環境の実際の path へ
 # 置換して render・配置する。手動で配置する場合は実 path へ書き換えること。
 #
-# 重要: real mode の collector は `codex` / `claude` CLI を実行し、その CLI が
-# 自分の HOME 配下の login 情報を読む。そのため
-#   - User= / Group= は Codex/Claude に login 済みのアカウントにすること
+# 重要: real mode の collector は `codex` / `grok` CLIを実行し、Claude は
+# HOME 配下の OAuth credentials を読む。そのため
+#   - User= / Group= は Codex login 済み、Claude OAuth credentials を所有するアカウントにすること
 #     (= deploy を実行した通常ユーザー。install user が collector を動かす)
-#   - ProtectHome= は有効にできない(CLI が HOME を読み書きする)
-# collector 自身は認証ファイルも transcript も直接読まない。
+#   - ProtectHome= は有効にできない(Codex CLI / Claude credentials が HOME を読む)
+# collector は Claude credentials から OAuth access token だけを一時的に読み、
+# rate limit APIへ送る。token・transcript・レスポンス本文は保存・ログ出力しない。
 [Unit]
 Description=Limit Monitor Collector (Codex/Claude/Grok usage limits)
 After=network-online.target limit-monitor-hub.service
@@ -25,7 +26,7 @@ Wants=network-online.target limit-monitor-hub.service
 
 [Service]
 Type=simple
-# Codex/Claude に login しているアカウント(= deploy を実行した install user)へ
+# Codex login / Claude OAuth credentials を持つアカウント(= deploy を実行した install user)へ
 # 置き換える。limit-monitor 専用の Linux user は作らないし前提にもしない。
 # deploy.ts が SUDO_USER(sudo 経由)または現在のユーザーから自動解決した
 # user:group で placeholder を埋めた unit を配置する(利用者に user / group の
@@ -54,7 +55,7 @@ Restart=on-failure
 RestartSec=30
 
 # hardening
-# vendor CLI が HOME の login 情報を読むため ProtectHome は無効にする
+# Codex CLI / Claude OAuth credentials が HOME を読むため ProtectHome は無効にする
 NoNewPrivileges=true
 ProtectHome=false
 PrivateTmp=true

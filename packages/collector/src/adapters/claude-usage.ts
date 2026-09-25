@@ -1,14 +1,19 @@
 import * as z from 'zod/mini'
+import crypto from 'node:crypto'
 import type { Observation } from 'shared/src/contracts'
 import { MAX_BUCKETS_PER_OBSERVATION } from 'shared/src/contracts'
 import { calcRemainingPercent } from 'shared/src/remaining'
+import { normalizeEpochOrIso } from '../lib/normalize-time.js'
 import { zonedWallTimeOf, zonedWallTimeToUtc } from '../lib/zoned-time.js'
 
 /**
- * `claude -p "/usage" --output-format json` の実測出力から rate limit 行だけを
- * 取り出す adapter。
+ * Claude usage API / 旧 CLI 本文から rate limit を取り出す adapter。
  *
- * CLI は次の形の JSON を返し、人間向けの本文が `result` に入る:
+ * 現在の collector は undocumented OAuth usage API を使う。API の
+ * `parseClaudeUsagePayload` は `five_hour` / `seven_day_*` の utilization を扱い、
+ * 下記の CLI 本文 parser は過去 fixture との互換性のために残している。
+ *
+ * 旧 CLI 本文は次の形だった:
  *
  * ```text
  * Current session: 11% used · resets Sep 1, 9:19pm (Asia/Tokyo)
@@ -19,7 +24,7 @@ import { zonedWallTimeOf, zonedWallTimeToUtc } from '../lib/zoned-time.js'
  * `result` には「Top skills」「Top subagents」などの利用内訳も含まれるが、
  * ここで取り出すのは `Current ...: N% used [· resets ...]` 行のみで、
  * skill 名・subagent 名・session 数・repository 情報は一切読まない。
- * transcript や認証ファイルは開かない(CLI の stdout だけを入力とする)。
+ * いずれの parser も transcript や認証情報を入力にしない。
  */
 export type ClaudeUsageLimit = {
   bucketId: string
@@ -43,6 +48,293 @@ export type ClaudeUsageEnvelopeResult =
       reason: 'invalid_json' | 'unexpected_shape' | 'cli_error' | 'empty_result'
       detail: string
     }
+
+export type ClaudeUsagePayloadResult =
+  | { ok: true; limits: ClaudeUsageLimit[] }
+  | { ok: false; reason: 'unexpected_shape' | 'no_rate_limits'; detail: string }
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function usageWindowDefinition(key: string): {
+  bucketId: string
+  label: string
+  windowDurationSeconds: number
+} | null {
+  if (key === 'five_hour') {
+    return {
+      bucketId: 'claude:session',
+      label: '5h',
+      windowDurationSeconds: SESSION_WINDOW_SECONDS
+    }
+  }
+  if (key === 'seven_day') {
+    return { bucketId: 'claude:week', label: '7d', windowDurationSeconds: WEEK_WINDOW_SECONDS }
+  }
+  if (!key.startsWith('seven_day_')) {
+    return null
+  }
+  const scope = key.slice('seven_day_'.length).replace(/_/g, ' ').trim()
+  const slug = slugify(scope)
+  if (slug.length === 0) {
+    return null
+  }
+  const label = scope
+    .split(' ')
+    .map((word) => {
+      return word.length === 0 ? word : `${word[0]?.toUpperCase() ?? ''}${word.slice(1)}`
+    })
+    .join(' ')
+  return {
+    bucketId: `claude:week:${slug}`,
+    label: `7d ${label}`.slice(0, 32),
+    windowDurationSeconds: WEEK_WINDOW_SECONDS
+  }
+}
+
+function usagePercent(window: Record<string, unknown>): number | null {
+  // OAuth usage payloads expose utilization as a percentage (including valid
+  // sub-one values such as 0.5%). Never infer a fractional scale from value
+  // magnitude alone.
+  const utilization = window.utilization
+  if (typeof utilization === 'number' && Number.isFinite(utilization)) {
+    return utilization
+  }
+  const usedPercentage = window.used_percentage
+  return typeof usedPercentage === 'number' && Number.isFinite(usedPercentage)
+    ? usedPercentage
+    : null
+}
+
+function usageReset(value: unknown): string | null {
+  if (
+    typeof value !== 'string' &&
+    typeof value !== 'number' &&
+    value !== null &&
+    value !== undefined
+  ) {
+    return null
+  }
+  return normalizeEpochOrIso(value)
+}
+
+type ClaudeUsageApiLimit = {
+  kind: string
+  usedPercent: number
+  resetsAt: string | null
+  modelDisplayName: string | null
+  modelId: string | null
+  scopeSurface: string | null
+  scopeSurfaceId: string | null
+}
+
+function usageApiScope(value: unknown): {
+  modelDisplayName: string | null
+  modelId: string | null
+  scopeSurface: string | null
+  scopeSurfaceId: string | null
+} {
+  if (!isRecord(value)) {
+    return {
+      modelDisplayName: null,
+      modelId: null,
+      scopeSurface: null,
+      scopeSurfaceId: null
+    }
+  }
+  const model = isRecord(value.model) ? value.model : null
+  const displayName = model?.display_name
+  const modelId = model?.id
+  const surface = value.surface
+  const surfaceRecord = isRecord(surface) ? surface : null
+  const surfaceDisplayName = surfaceRecord?.display_name
+  const surfaceName = surfaceRecord?.name
+  const surfaceId = surfaceRecord?.id
+  const surfaceLabel = surfaceRecord
+    ? [surfaceDisplayName, surfaceName, surfaceId].find(
+        (candidate): candidate is string =>
+          typeof candidate === 'string' && candidate.trim().length > 0
+      )
+    : surface
+  return {
+    modelDisplayName:
+      typeof displayName === 'string' && displayName.trim().length > 0 ? displayName.trim() : null,
+    modelId: typeof modelId === 'string' && modelId.trim().length > 0 ? modelId.trim() : null,
+    scopeSurface:
+      typeof surfaceLabel === 'string' && surfaceLabel.trim().length > 0
+        ? surfaceLabel.trim()
+        : null,
+    scopeSurfaceId:
+      typeof surfaceId === 'string' && surfaceId.trim().length > 0 ? surfaceId.trim() : null
+  }
+}
+
+function parseUsageApiLimit(value: unknown): ClaudeUsageApiLimit | null {
+  if (!isRecord(value) || typeof value.kind !== 'string') {
+    return null
+  }
+  const usedPercent = value.percent
+  if (typeof usedPercent !== 'number' || !Number.isFinite(usedPercent)) {
+    return null
+  }
+  const scope = usageApiScope(value.scope)
+  return {
+    kind: value.kind,
+    usedPercent,
+    resetsAt: usageReset(value.resets_at),
+    ...scope
+  }
+}
+
+function canonicalScopeBucketId(identity: string, displayLabel: string): string {
+  const slug = slugify(displayLabel) || slugify(identity) || 'scoped'
+  const digest = crypto.createHash('sha256').update(identity, 'utf8').digest('hex').slice(0, 32)
+  return `claude:week:${slug}-${digest}`
+}
+
+function usageApiLimitDefinition(limit: ClaudeUsageApiLimit): BucketIdentity | null {
+  if (limit.kind === 'session') {
+    return {
+      bucketId: 'claude:session',
+      label: '5h',
+      windowDurationSeconds: SESSION_WINDOW_SECONDS
+    }
+  }
+  if (limit.kind === 'weekly_all') {
+    return {
+      bucketId: 'claude:week',
+      label: '7d',
+      windowDurationSeconds: WEEK_WINDOW_SECONDS
+    }
+  }
+  if (limit.kind !== 'weekly_scoped') {
+    return null
+  }
+  const scopeLabel = limit.modelDisplayName ?? limit.modelId ?? limit.scopeSurface ?? 'Scoped'
+  const scopeIdentity =
+    limit.modelId ?? limit.scopeSurfaceId ?? limit.scopeSurface ?? limit.modelDisplayName
+  return {
+    bucketId: scopeIdentity
+      ? canonicalScopeBucketId(scopeIdentity, scopeLabel)
+      : 'claude:week:scoped',
+    label: `7d ${scopeLabel}`.slice(0, 32),
+    windowDurationSeconds: WEEK_WINDOW_SECONDS
+  }
+}
+
+function isPlaceholderUsageApiLimit(limit: ClaudeUsageApiLimit): boolean {
+  return (
+    limit.modelDisplayName === null &&
+    limit.modelId === null &&
+    limit.scopeSurface === null &&
+    limit.scopeSurfaceId === null &&
+    limit.usedPercent === 0 &&
+    limit.resetsAt === null
+  )
+}
+
+function legacyAliasesForCanonicalLimit(
+  limit: ClaudeUsageApiLimit,
+  definition: BucketIdentity
+): string[] {
+  if (limit.kind !== 'weekly_scoped') return []
+  return [limit.modelDisplayName, limit.modelId, limit.scopeSurface, limit.scopeSurfaceId]
+    .filter((value): value is string => value !== null)
+    .map((value) => slugify(value))
+    .filter((value) => value.length > 0)
+    .map((value) => `claude:week:${value}`)
+    .filter((bucketId) => bucketId !== definition.bucketId)
+}
+
+/** undocumented OAuth usage API の JSON payload を正規化する。 */
+export function parseClaudeUsagePayload(raw: unknown): ClaudeUsagePayloadResult {
+  if (!isRecord(raw)) {
+    return {
+      ok: false,
+      reason: 'unexpected_shape',
+      detail: 'claude usage API returned an unexpected JSON shape'
+    }
+  }
+
+  const keys: string[] = ['five_hour', 'seven_day']
+  for (const key of Object.keys(raw)) {
+    if (key.startsWith('seven_day_') && !keys.includes(key)) {
+      keys.push(key)
+    }
+  }
+
+  const limits: ClaudeUsageLimit[] = []
+  const seen = new Set<string>()
+
+  // `limits[]` is the canonical response in current Claude Code versions. A
+  // transition response may include both formats; prefer the canonical value
+  // and use top-level windows only as a backwards-compatible fallback.
+  if (Array.isArray(raw.limits)) {
+    for (const rawLimit of raw.limits) {
+      const parsedLimit = parseUsageApiLimit(rawLimit)
+      const definition = parsedLimit ? usageApiLimitDefinition(parsedLimit) : null
+      if (
+        !parsedLimit ||
+        !definition ||
+        isPlaceholderUsageApiLimit(parsedLimit) ||
+        seen.has(definition.bucketId)
+      ) {
+        continue
+      }
+      seen.add(definition.bucketId)
+      for (const alias of legacyAliasesForCanonicalLimit(parsedLimit, definition)) {
+        seen.add(alias)
+      }
+      limits.push({
+        bucketId: definition.bucketId,
+        label: definition.label,
+        usedPercent: parsedLimit.usedPercent,
+        windowDurationSeconds: definition.windowDurationSeconds,
+        resetsAt: parsedLimit.resetsAt
+      })
+      if (limits.length >= MAX_BUCKETS_PER_OBSERVATION) {
+        break
+      }
+    }
+  }
+
+  if (limits.length >= MAX_BUCKETS_PER_OBSERVATION) {
+    return { ok: true, limits }
+  }
+
+  for (const key of keys) {
+    const definition = usageWindowDefinition(key)
+    const window = raw[key]
+    if (!definition || !isRecord(window)) {
+      continue
+    }
+    const usedPercent = usagePercent(window)
+    if (usedPercent === null || seen.has(definition.bucketId)) {
+      continue
+    }
+    seen.add(definition.bucketId)
+    limits.push({
+      bucketId: definition.bucketId,
+      label: definition.label,
+      usedPercent,
+      windowDurationSeconds: definition.windowDurationSeconds,
+      resetsAt: usageReset(window.resets_at)
+    })
+    if (limits.length >= MAX_BUCKETS_PER_OBSERVATION) {
+      break
+    }
+  }
+
+  if (limits.length === 0) {
+    return {
+      ok: false,
+      reason: 'no_rate_limits',
+      detail: 'claude usage API returned no usable rate limit window'
+    }
+  }
+  return { ok: true, limits }
+}
 
 /** CLI stdout(JSON)から人間向け本文を取り出す。本文自体はログへ出さない */
 export function parseClaudeUsageEnvelope(stdout: string): ClaudeUsageEnvelopeResult {

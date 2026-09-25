@@ -308,7 +308,7 @@ test('canonical deploy runtime は既存 collector.env から obsolete interval 
       },
       {
         user: 'test-user',
-        uid: 1000,
+        uid: process.getuid?.() ?? 1000,
         group: 'test-group',
         gid: 1000,
         home: '/tmp',
@@ -325,6 +325,160 @@ test('canonical deploy runtime は既存 collector.env から obsolete interval 
     expect(prepared.content).not.toContain('COLLECTOR_INTERVAL_SECONDS')
     expect(prepared.content).toContain('SOURCE_ID=existing-host')
     expect(prepared.content).toContain('COLLECTOR_PROVIDERS=codex')
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('canonical deploy runtime は Claude CLI ではなく OAuth credentials を検証する', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'limit-monitor-claude-credentials-'))
+  try {
+    const dest = path.join(dir, 'collector.env')
+    const credentials = path.join(dir, 'credentials.json')
+    fs.writeFileSync(
+      credentials,
+      '{"claudeAiOauth":{"scopes":["user:profile","user:inference"],"accessToken":"[REDACTED]"}}\n'
+    )
+    fs.chmodSync(credentials, 0o600)
+    fs.writeFileSync(
+      dest,
+      [
+        'INSTALL_DIR=/var/www/limit-monitor',
+        'COLLECTOR_MODE=real',
+        'COLLECTOR_PROVIDERS=claude',
+        `CLAUDE_CREDENTIALS_FILE=${credentials}`,
+        ''
+      ].join('\n')
+    )
+    const calls: string[][] = []
+    const prepared = prepareCollectorEnv(
+      (command, args = []) => {
+        calls.push([command, ...args])
+        if (command === 'runuser' && args.includes('test')) {
+          return { status: 0, stdout: '', stderr: '' }
+        }
+        throw new Error(`unexpected command: ${command} ${args.join(' ')}`)
+      },
+      {
+        user: 'test-user',
+        uid: process.getuid?.() ?? 1000,
+        group: 'test-group',
+        gid: 1000,
+        home: dir,
+        shell: '/bin/sh'
+      },
+      REPO_ROOT,
+      dest,
+      '/var/www/limit-monitor',
+      undefined,
+      {}
+    )
+
+    expect(prepared.existing).toBe(true)
+    expect(calls).toEqual([
+      ['runuser', '-u', 'test-user', '--', 'test', '-f', credentials],
+      ['runuser', '-u', 'test-user', '--', 'test', '!', '-L', credentials],
+      ['runuser', '-u', 'test-user', '--', 'test', '-r', credentials]
+    ])
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('canonical deploy runtime は Claude credentials の構造と scope を fail-closed で検証する', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'limit-monitor-claude-invalid-credentials-'))
+  try {
+    const dest = path.join(dir, 'collector.env')
+    const credentials = path.join(dir, 'credentials.json')
+    fs.writeFileSync(credentials, '{"claudeAiOauth":{"accessToken":"[REDACTED]"}}\n')
+    fs.writeFileSync(
+      dest,
+      [
+        'INSTALL_DIR=/var/www/limit-monitor',
+        'COLLECTOR_MODE=real',
+        'COLLECTOR_PROVIDERS=claude',
+        `CLAUDE_CREDENTIALS_FILE=${credentials}`,
+        ''
+      ].join('\n')
+    )
+    expect(() =>
+      prepareCollectorEnv(
+        (command, args = []) => {
+          if (command === 'runuser' && args.includes('test')) {
+            return { status: 0, stdout: '', stderr: '' }
+          }
+          throw new Error(`unexpected command: ${command} ${args.join(' ')}`)
+        },
+        {
+          user: 'test-user',
+          uid: process.getuid?.() ?? 1000,
+          group: 'test-group',
+          gid: 1000,
+          home: dir,
+          shell: '/bin/sh'
+        },
+        REPO_ROOT,
+        dest,
+        '/var/www/limit-monitor',
+        undefined,
+        {}
+      )
+    ).toThrow(/invalid or lack the user:profile scope/)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('canonical deploy runtime は期限切れ refresh token だけの credentials を拒否する', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'limit-monitor-claude-expired-credentials-'))
+  try {
+    const dest = path.join(dir, 'collector.env')
+    const credentials = path.join(dir, 'credentials.json')
+    fs.writeFileSync(
+      credentials,
+      JSON.stringify({
+        claudeAiOauth: {
+          scopes: ['user:profile'],
+          refreshToken: 'expired-refresh-token',
+          expiresAt: Date.now() - 1,
+          refreshTokenExpiresAt: Date.now() - 1
+        }
+      })
+    )
+    fs.chmodSync(credentials, 0o600)
+    fs.writeFileSync(
+      dest,
+      [
+        'INSTALL_DIR=/var/www/limit-monitor',
+        'COLLECTOR_MODE=real',
+        'COLLECTOR_PROVIDERS=claude',
+        `CLAUDE_CREDENTIALS_FILE=${credentials}`,
+        ''
+      ].join('\n')
+    )
+    expect(() =>
+      prepareCollectorEnv(
+        (command, args = []) => {
+          if (command === 'runuser' && args.includes('test')) {
+            return { status: 0, stdout: '', stderr: '' }
+          }
+          throw new Error(`unexpected command: ${command} ${args.join(' ')}`)
+        },
+        {
+          user: 'test-user',
+          uid: process.getuid?.() ?? 1000,
+          group: 'test-group',
+          gid: 1000,
+          home: dir,
+          shell: '/bin/sh'
+        },
+        REPO_ROOT,
+        dest,
+        '/var/www/limit-monitor',
+        undefined,
+        {}
+      )
+    ).toThrow(/invalid or lack the user:profile scope/)
   } finally {
     fs.rmSync(dir, { recursive: true, force: true })
   }

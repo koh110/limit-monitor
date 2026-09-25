@@ -2,7 +2,13 @@ import fs from 'node:fs'
 import type { ProviderOutcome, ProviderReaders } from './collect.js'
 import { collectObservations, selectReaders } from './collect.js'
 import {
-  CLAUDE_BIN,
+  CLAUDE_CREDENTIALS_FILE,
+  CLAUDE_OAUTH_CLIENT_ID,
+  CLAUDE_OAUTH_TOKEN_URL,
+  CLAUDE_USAGE_CACHE_FILE,
+  CLAUDE_USAGE_CACHE_TTL_MS,
+  CLAUDE_USAGE_URL,
+  CLAUDE_USAGE_USER_AGENT,
   CODEX_BIN,
   COLLECTOR_MODE,
   COLLECTOR_VERSION,
@@ -35,7 +41,7 @@ function readToken(): string {
   throw new Error('HUB_TOKEN or HUB_TOKEN_FILE is required')
 }
 
-/** real mode の reader。手元にインストールされた各 CLI から実値を取得する */
+/** real mode の reader。各 vendor の実行経路から実値を取得する */
 function createRealReaders(): ProviderReaders {
   return {
     codex: createCodexReader({
@@ -45,9 +51,15 @@ function createRealReaders(): ProviderReaders {
       clientVersion: COLLECTOR_VERSION
     }),
     claude: createClaudeReader({
-      command: CLAUDE_BIN,
+      credentialsFile: CLAUDE_CREDENTIALS_FILE,
+      usageUrl: CLAUDE_USAGE_URL,
+      tokenUrl: CLAUDE_OAUTH_TOKEN_URL,
+      oauthClientId: CLAUDE_OAUTH_CLIENT_ID,
+      cacheFile: CLAUDE_USAGE_CACHE_FILE,
       timeoutMs: COMMAND_TIMEOUT_MS,
-      maxStdoutBytes: MAX_STDOUT_BYTES
+      maxResponseBytes: MAX_STDOUT_BYTES,
+      cacheTtlMs: CLAUDE_USAGE_CACHE_TTL_MS,
+      userAgent: CLAUDE_USAGE_USER_AGENT
     }),
     grok: createGrokReader({
       command: GROK_BIN,

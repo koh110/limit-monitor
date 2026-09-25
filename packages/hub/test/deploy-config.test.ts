@@ -94,11 +94,12 @@ test('Hub env が periodic collector trigger の間隔を管理する', () => {
   expect(HUB_ENV).not.toContain('COLLECTOR_INTERVAL_SECONDS')
 })
 
-test('Collector unit は vendor CLI が HOME の login 情報を読める', () => {
+test('Collector unit は install user の provider credentials を読める', () => {
   expect(COLLECTOR_UNIT).toContain('ProtectHome=false')
   expect(directivesOf(COLLECTOR_UNIT)).not.toContain('ProtectHome=true')
   expect(COLLECTOR_ENV).toContain('CODEX_BIN=')
-  expect(COLLECTOR_ENV).toContain('CLAUDE_BIN=')
+  expect(COLLECTOR_ENV).toContain('CLAUDE_CREDENTIALS_FILE')
+  expect(COLLECTOR_ENV).toContain('CLAUDE_USAGE_USER_AGENT=claude-code/')
   expect(COLLECTOR_ENV).toContain('GROK_BIN=')
 })
 

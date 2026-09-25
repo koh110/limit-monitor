@@ -3,6 +3,7 @@ import {
   buildClaudeUsageObservation,
   parseClaudeResetsAt,
   parseClaudeUsageEnvelope,
+  parseClaudeUsagePayload,
   parseClaudeUsageText,
   toClaudeBucketIdentity
 } from './claude-usage.js'
@@ -274,6 +275,243 @@ test('limit が空なら Observation を作らない(古い Hub 値を消さな�
   expect(
     buildClaudeUsageObservation({ limits: [], sourceId: 'dev-machine', observedAt: OBSERVED_AT })
   ).toBe(null)
+})
+
+test('OAuth usage API の payload は既知の rate limit window だけを bucket 化する', () => {
+  expect(
+    parseClaudeUsagePayload({
+      five_hour: { utilization: 11.5, resets_at: '2026-09-01T12:19:00.000Z' },
+      seven_day: { utilization: 13, resets_at: '2026-09-06T11:59:00.000Z' },
+      seven_day_sonnet: { utilization: 17, resets_at: '2026-09-06T11:59:00.000Z' },
+      extra_usage: { utilization: 99 }
+    })
+  ).toEqual({
+    ok: true,
+    limits: [
+      {
+        bucketId: 'claude:session',
+        label: '5h',
+        usedPercent: 11.5,
+        windowDurationSeconds: 18000,
+        resetsAt: '2026-09-01T12:19:00.000Z'
+      },
+      {
+        bucketId: 'claude:week',
+        label: '7d',
+        usedPercent: 13,
+        windowDurationSeconds: 604800,
+        resetsAt: '2026-09-06T11:59:00.000Z'
+      },
+      {
+        bucketId: 'claude:week:sonnet',
+        label: '7d Sonnet',
+        usedPercent: 17,
+        windowDurationSeconds: 604800,
+        resetsAt: '2026-09-06T11:59:00.000Z'
+      }
+    ]
+  })
+})
+
+test('新しい limits[] 形式では Fable 等の weekly_scoped も bucket 化する', () => {
+  expect(
+    parseClaudeUsagePayload({
+      five_hour: null,
+      seven_day: null,
+      seven_day_sonnet: null,
+      limits: [
+        {
+          kind: 'session',
+          percent: 4,
+          resets_at: '2026-09-01T12:19:00.000Z',
+          scope: null
+        },
+        {
+          kind: 'weekly_all',
+          percent: 18,
+          resets_at: '2026-09-06T11:59:00.000Z',
+          scope: null
+        },
+        {
+          kind: 'weekly_scoped',
+          percent: 23,
+          resets_at: '2026-09-06T11:59:00.000Z',
+          scope: { model: { display_name: 'Fable' } }
+        }
+      ]
+    })
+  ).toEqual({
+    ok: true,
+    limits: [
+      {
+        bucketId: 'claude:session',
+        label: '5h',
+        usedPercent: 4,
+        windowDurationSeconds: 18000,
+        resetsAt: '2026-09-01T12:19:00.000Z'
+      },
+      {
+        bucketId: 'claude:week',
+        label: '7d',
+        usedPercent: 18,
+        windowDurationSeconds: 604800,
+        resetsAt: '2026-09-06T11:59:00.000Z'
+      },
+      {
+        bucketId: 'claude:week:fable-6489664b94f0ae56869e719ec024e1b5',
+        label: '7d Fable',
+        usedPercent: 23,
+        windowDurationSeconds: 604800,
+        resetsAt: '2026-09-06T11:59:00.000Z'
+      }
+    ]
+  })
+})
+
+test('limits[] と legacy window が同居する場合は limits[] を優先する', () => {
+  expect(
+    parseClaudeUsagePayload({
+      five_hour: { utilization: 2, resets_at: '2026-09-01T12:00:00.000Z' },
+      seven_day: { utilization: 3, resets_at: '2026-09-06T11:00:00.000Z' },
+      limits: [
+        { kind: 'session', percent: 42, resets_at: '2026-09-01T12:19:00.000Z', scope: null },
+        { kind: 'weekly_all', percent: 43, resets_at: '2026-09-06T11:59:00.000Z', scope: null }
+      ]
+    })
+  ).toMatchObject({
+    ok: true,
+    limits: [
+      { bucketId: 'claude:session', usedPercent: 42 },
+      { bucketId: 'claude:week', usedPercent: 43 }
+    ]
+  })
+})
+
+test('canonical scoped id が opaque でも display name alias で legacy fallback を抑止する', () => {
+  expect(
+    parseClaudeUsagePayload({
+      seven_day_sonnet: { utilization: 88, resets_at: null },
+      limits: [
+        {
+          kind: 'weekly_scoped',
+          percent: 12,
+          resets_at: null,
+          scope: { model: { id: 'opaque-model', display_name: 'Sonnet' } }
+        }
+      ]
+    })
+  ).toMatchObject({
+    ok: true,
+    limits: [{ bucketId: 'claude:week:sonnet-1ade9c81caebe6abda520fac695bac2c', usedPercent: 12 }]
+  })
+})
+
+test('weekly_scoped は model id または surface を display name の fallback に使う', () => {
+  expect(
+    parseClaudeUsagePayload({
+      limits: [
+        {
+          kind: 'weekly_scoped',
+          percent: 12,
+          resets_at: null,
+          scope: { model: { id: 'model-a', display_name: 'Same name' } }
+        },
+        {
+          kind: 'weekly_scoped',
+          percent: 13,
+          resets_at: null,
+          scope: { model: { id: 'model-b', display_name: 'Same name' } }
+        },
+        { kind: 'weekly_scoped', percent: 14, resets_at: null, scope: { surface: 'opus' } }
+      ]
+    })
+  ).toMatchObject({
+    ok: true,
+    limits: [
+      { bucketId: 'claude:week:same-name-73f95cf180a19624e4be9a711fd53a90', label: '7d Same name' },
+      { bucketId: 'claude:week:same-name-af30308345d789145d9087a8d6e5037a', label: '7d Same name' },
+      { bucketId: 'claude:week:opus-e12ce8285efc67c6d93d3a122e2589ed', label: '7d opus' }
+    ]
+  })
+})
+
+test('limits[] の surface object は display name と id を bucket identity に使う', () => {
+  expect(
+    parseClaudeUsagePayload({
+      limits: [
+        {
+          kind: 'weekly_scoped',
+          percent: 11,
+          resets_at: null,
+          scope: { surface: { id: 'web', display_name: 'Web' } }
+        },
+        {
+          kind: 'weekly_scoped',
+          percent: 22,
+          resets_at: null,
+          scope: { surface: { id: 'api', display_name: 'API' } }
+        }
+      ]
+    })
+  ).toMatchObject({
+    ok: true,
+    limits: [
+      {
+        bucketId: 'claude:week:web-4b5e57f6eb2f42b9039b3d1e13929295',
+        label: '7d Web',
+        usedPercent: 11
+      },
+      {
+        bucketId: 'claude:week:api-14c2529eb4498c5d1ffd6915d05bf58a',
+        label: '7d API',
+        usedPercent: 22
+      }
+    ]
+  })
+})
+
+test('legacy utilization は 0-100 の percentage として小数を保持する', () => {
+  expect(
+    parseClaudeUsagePayload({ five_hour: { utilization: 0.97, resets_at: null } })
+  ).toMatchObject({ ok: true, limits: [{ bucketId: 'claude:session', usedPercent: 0.97 }] })
+})
+
+test('legacy utilization は兄弟 window が揃っていても 0-100 の percentage を保持する', () => {
+  expect(
+    parseClaudeUsagePayload({
+      five_hour: { utilization: 0.5, resets_at: null },
+      seven_day: { utilization: 0.55, resets_at: null }
+    })
+  ).toMatchObject({
+    ok: true,
+    limits: [
+      { bucketId: 'claude:session', usedPercent: 0.5 },
+      { bucketId: 'claude:week', usedPercent: 0.55 }
+    ]
+  })
+})
+
+test('limits[] の未稼働 placeholder は fake の 0% として採用しない', () => {
+  expect(
+    parseClaudeUsagePayload({
+      limits: [
+        { kind: 'session', percent: 0, resets_at: null, scope: null },
+        { kind: 'weekly_all', percent: 0, resets_at: null, scope: null }
+      ]
+    })
+  ).toMatchObject({ ok: false, reason: 'no_rate_limits' })
+})
+
+test('OAuth usage API の空 payload は rate limit なしとして返す', () => {
+  expect(parseClaudeUsagePayload({ extra_usage: null })).toEqual({
+    ok: false,
+    reason: 'no_rate_limits',
+    detail: 'claude usage API returned no usable rate limit window'
+  })
+  expect(parseClaudeUsagePayload('not an object')).toMatchObject({
+    ok: false,
+    reason: 'unexpected_shape'
+  })
 })
 
 test('100% 到達で reached を立て、範囲外は clamp する', () => {

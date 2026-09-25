@@ -14,7 +14,7 @@ limit-collector ──▶ limit-hub ──▶ limit-dashboard
                     SQLite       React SPA
 ```
 
-- `limit-collector`: ローカルのCodex / Claude CLI、Grok BuildのACP billing APIから実値を取得してHubへ送信
+- `limit-collector`: ローカルのCodex CLI / Claude Code OAuth usage API、Grok BuildのACP billing APIから実値を取得してHubへ送信
 - `limit-hub`: 認証、観測値の保存、Dashboard向けAPI
 - `limit-dashboard`: Hub APIを表示するWeb Dashboard
 
@@ -24,8 +24,8 @@ limit-collector ──▶ limit-hub ──▶ limit-dashboard
 
 - Node.js 24.x
 - npm
-- 選択したproviderに応じて Codex CLI / Claude Code / Grok Build
-- Codex / Claudeを選ぶ場合は、Collectorを実行するユーザーで各CLIへlogin済みであること
+- 選択したproviderに応じて Codex CLI / Claude Code credentials / Grok Build
+- Codexを選ぶ場合はCollectorを実行するユーザーでCodex CLIへlogin済み、Claudeを選ぶ場合は同じユーザーのClaude Code OAuth credentialsが有効であること
 - Grokを選ぶ場合は、Collectorを実行するユーザーでGrok CLIへlogin済みであること
 
 ## 開発環境
@@ -85,7 +85,7 @@ COLLECTOR_MODE=mock HUB_TOKEN=<token> SOURCE_ID=<source-id> \
 
 以下は**初めてsystemdへ配置する場合の順番**です。`collector-token`を配置する前にdeployすると、token不足で停止します。
 
-1. 使用するproviderを決めます。Codex / Claude / Grokを使う場合はCollectorを実行する通常ユーザーで各CLIへloginします。GrokはACP billing APIを利用します。
+1. 使用するproviderを決めます。Codex / Claudeを使う場合はCollectorを実行する通常ユーザーで、それぞれCodex CLI / Claude Codeへloginします。Claudeは保存されたOAuth credentialsからusage APIを呼び、GrokはACP billing APIを利用します。
 2. state directoryをinstall user所有で作成します。
 3. production DBをmigrationし、Collector tokenを発行します。
 4. 発行されたtokenをroot所有・mode `600`で配置します。
@@ -152,7 +152,7 @@ sudo ./deploy.ts \
 
 `--server`はHubとDashboard、`--collector`はCollectorを対象にします。`--providers`は`--collector`と組み合わせ、`codex,claude,grok`から1つ以上をカンマ区切りで指定します。
 
-`--providers`を明示した場合は、既存の`/etc/limit-monitor/collector.env`を基準に`COLLECTOR_PROVIDERS`だけを更新したcandidateを作り、そのcandidateを使ってCLI存在確認などのread-only validationをすべて実行します。全validationに成功した後だけ、正規化したprovider一覧を`collector.env`へatomicに永続化します。既存ファイルの他の設定・コメント・mode/ownerは保持します。systemd unitへ一時的な`Environment=COLLECTOR_PROVIDERS=...` overrideは追加しません。
+`--providers`を明示した場合は、既存の`/etc/limit-monitor/collector.env`を基準に`COLLECTOR_PROVIDERS`だけを更新したcandidateを作り、そのcandidateを使ってCodex/Grok CLIの存在確認、Claude OAuth credentialsのreadable確認などのread-only validationをすべて実行します。全validationに成功した後だけ、正規化したprovider一覧を`collector.env`へatomicに永続化します。既存ファイルの他の設定・コメント・mode/ownerは保持します。systemd unitへ一時的な`Environment=COLLECTOR_PROVIDERS=...` overrideは追加しません。
 
 `--providers`を省略した場合、既存の`collector.env`は書き換えず、そこに永続化済みの`COLLECTOR_PROVIDERS`をそのまま利用します。既存envがない初回deployでのみ`deploy/collector.env.example`の既定値を使います。空要素・未知provider・重複provider、`--collector`なしの`--providers`は設定変更前にfail-closedで拒否されます。既存envにactiveな重複keyがある場合も配置前に停止します。
 
@@ -160,7 +160,7 @@ sudo ./deploy.ts \
 
 Deployを実行した通常ユーザーが、3サービスのsystemd実行ユーザーになります。専用Linux userやgroupは作成しません。`sudo`経由では`SUDO_USER`とprimary groupを自動解決します。rootへ直接loginして実行する場合は拒否されます。
 
-Codex / Claudeをproviderとして選ぶ場合、同じinstallユーザーで対象CLIへlogin済みである必要があります。Grokだけを選択した場合、Codex / Claude CLIはdeploy時に要求されません。Collector tokenや手編集された非管理systemd unitはdeployで黙って上書きしません。
+Codexをproviderとして選ぶ場合は同じinstallユーザーでCodex CLIへlogin済み、Claudeを選ぶ場合は同じユーザーからClaude OAuth credentials fileをreadableにできる必要があります。Grokだけを選択した場合、Codex CLIやClaude credentialsはdeploy時に要求されません。Collector tokenや手編集された非管理systemd unitはdeployで黙って上書きしません。
 
 初回構築は上の「初回構築」を先に実行してください。既存hostの移行、rollback、CORS、systemd状態確認は[`docs/operations.md`](docs/operations.md)を参照してください。
 
