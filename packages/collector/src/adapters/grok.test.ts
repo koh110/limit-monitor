@@ -48,6 +48,54 @@ test('creditUsagePercent=69 は使用済み69%・残り31%として保持する'
     reached: false
   })
 })
+test('利用率が省略された unified billing の新しい期間は 0% 使用として reset を更新する', () => {
+  const observation = buildGrokObservation({
+    payload: {
+      config: {
+        currentPeriod: {
+          type: 'USAGE_PERIOD_TYPE_WEEKLY',
+          start: '2026-09-18T20:48:49.432096+00:00',
+          end: '2026-09-25T20:48:49.432096+00:00'
+        },
+        onDemandCap: { val: 0 },
+        onDemandUsed: { val: 0 },
+        prepaidBalance: { val: 0 },
+        isUnifiedBillingUser: true,
+        billingPeriodStart: '2026-09-18T20:48:49.432096+00:00',
+        billingPeriodEnd: '2026-09-25T20:48:49.432096+00:00'
+      }
+    },
+    sourceId: 'dev-machine',
+    observedAt: OBSERVED_AT
+  })
+
+  expect(observation?.buckets[0]).toMatchObject({
+    bucketId: 'grok:weekly',
+    usedPercent: 0,
+    remainingPercent: 100,
+    resetsAt: '2026-09-25T20:48:49.432Z',
+    reached: false
+  })
+})
+
+test('利用率が省略された非 unified billing の応答は観測を作らない', () => {
+  expect(
+    buildGrokObservation({
+      payload: {
+        config: {
+          currentPeriod: {
+            type: 'USAGE_PERIOD_TYPE_WEEKLY',
+            start: '2026-09-18T20:48:49.432096+00:00',
+            end: '2026-09-25T20:48:49.432096+00:00'
+          }
+        }
+      },
+      sourceId: 'dev-machine',
+      observedAt: OBSERVED_AT
+    })
+  ).toBeNull()
+})
+
 test('旧 monthlyLimit/used 応答へ fallback する', () => {
   const observation = buildGrokObservation({
     payload: {

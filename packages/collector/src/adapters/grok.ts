@@ -53,6 +53,32 @@ function readLegacyPercent(config: Record<string, unknown>): number | null {
   return clampPercent((Math.abs(used) / Math.abs(limit)) * 100)
 }
 
+function readUsagePercent(
+  config: Record<string, unknown>,
+  period: { id: string; resetsAt: string | null }
+): number | null {
+  const currentPercent = finiteNumber(config.creditUsagePercent)
+  if (currentPercent !== null) {
+    // 現行ACPのcreditUsagePercentはGrok UIの使用済み率として返る。
+    return clampPercent(currentPercent)
+  }
+  const legacyUsedPercent = readLegacyPercent(config)
+  if (legacyUsedPercent !== null) {
+    return legacyUsedPercent
+  }
+  // unified billing は利用開始直後などに creditUsagePercent を省略するが、
+  // currentPeriod は返す。この場合は新しい期間の未使用状態として扱い、
+  // reset 時刻だけでなく最新の使用率も更新できるようにする。
+  if (
+    config.isUnifiedBillingUser === true &&
+    (period.id === 'weekly' || period.id === 'monthly') &&
+    period.resetsAt !== null
+  ) {
+    return 0
+  }
+  return null
+}
+
 function periodInfo(config: Record<string, unknown>): {
   id: string
   label: string
@@ -103,21 +129,13 @@ export function buildGrokObservation({
     return null
   }
   const config = payload.config
-  const currentPercent = finiteNumber(config.creditUsagePercent)
-  const legacyUsedPercent = readLegacyPercent(config)
-  let usedPercent: number
-  if (currentPercent === null) {
-    if (legacyUsedPercent === null) {
-      return null
-    }
-    usedPercent = legacyUsedPercent
-  } else {
-    // 現行ACPのcreditUsagePercentはGrok UIの使用済み率として返る。
-    usedPercent = clampPercent(currentPercent)
+  const period = periodInfo(config)
+  const usedPercent = readUsagePercent(config, period)
+  if (usedPercent === null) {
+    return null
   }
   const remainingPercent = calcRemainingPercent(usedPercent)
 
-  const period = periodInfo(config)
   return {
     schemaVersion: 1,
     provider: 'grok',
