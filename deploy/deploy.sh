@@ -1009,11 +1009,11 @@ validate_collector_credential_wiring() {
   log "verified collector token credential wiring: ${token_file} -> %d/hub-token (readable by systemd as root, exposed to ${INSTALL_USER} as a 0400 credential)"
 }
 
-# collector.env の CODEX_BIN / CLAUDE_BIN を INSTALL_USER の実行環境で検証する
+# collector.env の provider runtime prerequisite を INSTALL_USER の実行環境で検証する
 # (Major 1)。env の値を未検証のまま --install-systemd へ進めない:
-#   - real mode 以外(mock)では vendor CLI を使わないため対象外にできる
+#   - real mode 以外(mock)では vendor runtime を使わないため対象外にできる
 #   - COLLECTOR_PROVIDERS で無効な provider の CLI は対象外
-#   - 各 CLI は絶対 path として INSTALL_USER 環境で実行可能で存在すること
+#   - Codex/Grok CLI は絶対 path として INSTALL_USER 環境で実行可能で存在すること
 #     を確認する(systemd 配下は PATH が細い。bare command 名や slash 付き
 #     相対 path は PATH 依存・CWD 依存で再現できないため一律に拒否する)
 # 戻り値: 0 = 検証通過 / 非ゼロ = 拒否(呼び出し側が die)
@@ -1120,7 +1120,7 @@ effective_collector_providers() {
 }
 
 # vendor CLI の path を INSTALL_USER の実行環境で解決する。
-#   - 呼び出し元 env(CODEX_BIN / CLAUDE_BIN)に明示値があればそれを優先
+#   - 呼び出し元 env(CODEX_BIN / GROK_BIN)に明示値があればそれを優先
 #   - 未設定なら INSTALL_USER の login shell 経由で解決:
 #     `runuser -u <INSTALL_USER> -- <user_shell> -lc 'command -v -- <cli>'`
 #     (systemd 配下は PATH が細いため、ユーザーの login 環境で解決する。
@@ -1129,7 +1129,7 @@ effective_collector_providers() {
 #      解釈される(存在しない shell として失敗する)ため、shell を明示して
 #      その中に command -v を実行する安全形式へ統一する)
 #   - 解決できない(CLI 不在)は非ゼロ終了(呼び出し側が die)
-# $1 = 呼び出し元 env の key(CODEX_BIN / CLAUDE_BIN)、$2 = CLI 名(codex / claude)
+# $1 = 呼び出し元 env の key(CODEX_BIN / GROK_BIN)、$2 = CLI 名(codex / grok)
 resolve_collector_cli_path() {
   local env_key="$1"
   local cli="$2"
@@ -1150,15 +1150,15 @@ resolve_collector_cli_path() {
 }
 
 # 初回 install(collector.env 未作成)用の temp collector.env に、解決済み CLI
-# path を render する。example の固定 CODEX_BIN/CLAUDE_BIN(/usr/local/bin/...)
+# path を render する。example の固定 CODEX_BIN/GROK_BIN(/usr/local/bin/...)
 # はそのまま検証してはいけない(実環境に無い path で false failure になる)。
 # INSTALL_USER として解決した実際の path を temp env へ render してから
-# validate_collector_binaries に渡す。呼び出し元 env の CODEX_BIN/CLAUDE_BIN
+# validate_collector_binaries に渡す。呼び出し元 env の CODEX_BIN/GROK_BIN
 # は優先する。CLI 不在は die(fail-closed)。
 # $1 = render 済み temp collector.env の path
 render_initial_collector_cli_bins() {
   local temp_env="$1"
-  local providers codex_path claude_path
+  local providers codex_path
   if [[ -n "${DEPLOY_COLLECTOR_PROVIDERS:-}" ]]; then
     providers="${DEPLOY_COLLECTOR_PROVIDERS}"
   else
@@ -1172,12 +1172,6 @@ render_initial_collector_cli_bins() {
       || die "codex CLI not found in ${INSTALL_USER} environment (resolve: runuser -u ${INSTALL_USER} -- <user_shell> -lc 'command -v -- codex')"
     sed -i "s|^CODEX_BIN=.*|CODEX_BIN=${codex_path}|" "$temp_env"
     log "initial install: rendered resolved Codex CLI path into temp env (CODEX_BIN=${codex_path})"
-  fi
-  if provider_list_has "claude" "$providers"; then
-    claude_path="$(resolve_collector_cli_path CLAUDE_BIN claude)" \
-      || die "claude CLI not found in ${INSTALL_USER} environment (resolve: runuser -u ${INSTALL_USER} -- <user_shell> -lc 'command -v -- claude')"
-    sed -i "s|^CLAUDE_BIN=.*|CLAUDE_BIN=${claude_path}|" "$temp_env"
-    log "initial install: rendered resolved Claude CLI path into temp env (CLAUDE_BIN=${claude_path})"
   fi
 }
 
@@ -1265,15 +1259,35 @@ validate_collector_binaries() {
     log "verified codex CLI for ${INSTALL_USER}: ${bin}"
   fi
 
-  bin="$(read_env_value "$env_file" CLAUDE_BIN '')"
   if provider_list_has "claude" "$providers"; then
-    [[ -n "$bin" ]] \
-      || die "claude provider is enabled but CLAUDE_BIN is empty in ${env_file} (set an absolute path resolved as ${INSTALL_USER}: runuser -u ${INSTALL_USER} -- <user_shell> -lc 'command -v -- claude')"
-    [[ "$bin" == /* ]] \
-      || die "CLAUDE_BIN must be an absolute path (bare command names and relative paths are not accepted; got: ${bin}). Set it to an absolute path resolved as ${INSTALL_USER}: runuser -u ${INSTALL_USER} -- <user_shell> -lc 'command -v -- claude'"
-    resolve_collector_bin_as_user "$bin" \
-      || die "CLAUDE_BIN is not an executable in the ${INSTALL_USER} environment: ${bin} (set an absolute path resolved as ${INSTALL_USER}: runuser -u ${INSTALL_USER} -- <user_shell> -lc 'command -v -- claude')"
-    log "verified claude CLI for ${INSTALL_USER}: ${bin}"
+    local credentials_file config_dir install_home
+    credentials_file="$(read_env_value "$env_file" CLAUDE_CREDENTIALS_FILE '')"
+    if [[ -z "$credentials_file" ]]; then
+      config_dir="$(read_env_value "$env_file" CLAUDE_CONFIG_DIR '')"
+      install_home="$(getent passwd "${INSTALL_USER}" | cut -d: -f6)"
+      [[ -n "$install_home" ]] \
+        || die "cannot resolve ${INSTALL_USER} home while locating Claude OAuth credentials"
+      [[ -n "$config_dir" ]] || config_dir="${install_home}/.claude"
+      credentials_file="${config_dir}/.credentials.json"
+    fi
+    [[ "$credentials_file" == /* ]] \
+      || die "CLAUDE_CREDENTIALS_FILE must be an absolute path (got: ${credentials_file})"
+    runuser -u "${INSTALL_USER}" -- test -f "$credentials_file" 2>/dev/null \
+      || die "claude provider is enabled but credentials file is not a regular file for ${INSTALL_USER}: ${credentials_file} (run claude auth login first)"
+    runuser -u "${INSTALL_USER}" -- test ! -L "$credentials_file" 2>/dev/null \
+      || die "claude provider is enabled but credentials file must not be a symlink: ${credentials_file}"
+    runuser -u "${INSTALL_USER}" -- test -r "$credentials_file" 2>/dev/null \
+      || die "claude provider is enabled but credentials file is not readable for ${INSTALL_USER}: ${credentials_file}"
+    local node_bin
+    node_bin="${DEPLOY_NODE_BIN:-}"
+    [[ -n "$node_bin" ]] || node_bin="$(command -v node || true)"
+    [[ -n "$node_bin" ]] \
+      || die "node is required to validate Claude OAuth credentials"
+    runuser -u "${INSTALL_USER}" -- "$node_bin" --input-type=module -e \
+      'import fs from "node:fs"; const parsed=JSON.parse(fs.readFileSync(process.argv[1], "utf8")); const stat=fs.statSync(process.argv[1]); const link=fs.lstatSync(process.argv[1]); const securePermissions=!link.isSymbolicLink() && stat.uid===process.getuid() && (stat.mode & 0o077)===0 && (stat.mode & 0o400)!==0; const oauth=parsed?.claudeAiOauth; const scopes=Array.isArray(oauth?.scopes) ? oauth.scopes : typeof oauth?.scopes === "string" ? oauth.scopes.split(/\s+/).filter(Boolean) : null; const hasAccessToken=typeof oauth?.accessToken === "string" && oauth.accessToken.length > 0; const hasRefreshToken=typeof oauth?.refreshToken === "string" && oauth.refreshToken.length > 0; const expiresAt=oauth?.expiresAt; const refreshTokenExpiresAt=oauth?.refreshTokenExpiresAt; const validExpiry=(value) => value===undefined || value===null || (typeof value === "number" && Number.isFinite(value)); const toEpochMs=(value) => value < 1000000000000 ? value * 1000 : value; const accessTokenExpired=typeof expiresAt === "number" && Number.isFinite(expiresAt) && toEpochMs(expiresAt) <= Date.now(); const refreshTokenExpired=typeof refreshTokenExpiresAt === "number" && Number.isFinite(refreshTokenExpiresAt) && toEpochMs(refreshTokenExpiresAt) <= Date.now(); const usableAccessToken=hasAccessToken && !accessTokenExpired; const usableRefreshToken=hasRefreshToken && !refreshTokenExpired; if (!securePermissions || !oauth || !scopes || !scopes.every((scope) => typeof scope === "string" && scope.length > 0) || !scopes.includes("user:profile") || !validExpiry(expiresAt) || !validExpiry(refreshTokenExpiresAt) || !(usableAccessToken || usableRefreshToken)) process.exit(1)' \
+      "$credentials_file" 2>/dev/null \
+      || die "claude provider is enabled but credentials JSON is invalid or lacks the user:profile scope: ${credentials_file}"
+    log "verified Claude OAuth credentials for ${INSTALL_USER}: ${credentials_file}"
   fi
 }
 
@@ -2166,11 +2180,11 @@ if [[ "${DEPLOY_INSTALL_SYSTEMD}" == "1" ]]; then
   fi
   if [[ "${INSTALL_COLLECTOR}" -eq 1 ]]; then
     render_env_example "${REPO_ROOT}/deploy/collector.env.example" "${RENDERED_ENV_DIR}/collector.env"
-    # 1a) collector.env 未作成の初回 install: example 固定 CODEX_BIN/CLAUDE_BIN
+    # 1a) collector.env 未作成の初回 install: example 固定 CODEX_BIN/GROK_BIN
     #     (/usr/local/bin/...)をそのまま検証しない。INSTALL_USER の login
     #     shell 経由(`runuser -u <user> -- <shell> -lc 'command -v -- <cli>'`)で
     #     解決した path を temp env へ render して検証する(呼び出し元 env の
-    #     CODEX_BIN/CLAUDE_BIN は優先、CLI 不在は die)。render 済み env は
+    #     CODEX_BIN/GROK_BIN は優先、CLI 不在は die)。render 済み env は
     #     検証後に配置フェーズでもそのまま使う(byte-for-byte 一致、Major 1)
     if [[ ! -e "${LIMIT_MONITOR_ETC_DIR}/collector.env" ]]; then
       render_initial_collector_cli_bins "${RENDERED_ENV_DIR}/collector.env"
@@ -2265,7 +2279,7 @@ if [[ "${DEPLOY_INSTALL_SYSTEMD}" == "1" ]]; then
     validate_collector_token
     # 9a) token を service user が LoadCredential で読める配線になっているか
     validate_collector_credential_wiring "${RENDERED_SYSTEMD_DIR}/limit-monitor-collector.service"
-    # 10) vendor CLI: CODEX_BIN / CLAUDE_BIN を INSTALL_USER の環境で検証(Major 1)
+    # 10) provider runtime: Codex/Grok CLI と Claude credentials を検証(Major 1)
     validate_collector_binaries \
       "$(env_file_or_rendered "${LIMIT_MONITOR_ETC_DIR}/collector.env" "${RENDERED_ENV_DIR}/collector.env")"
   fi

@@ -397,6 +397,93 @@ function isExecutableAsUser(
   return runAsUser(runner, identity, 'test', ['-x', file], { allowFailure: true }).status === 0
 }
 
+function isReadableFileAsUser(
+  runner: CommandRunner,
+  identity: InstallIdentity,
+  file: string
+): boolean {
+  if (!path.isAbsolute(file)) return false
+  return (
+    runAsUser(runner, identity, 'test', ['-f', file], { allowFailure: true }).status === 0 &&
+    runAsUser(runner, identity, 'test', ['!', '-L', file], { allowFailure: true }).status === 0 &&
+    runAsUser(runner, identity, 'test', ['-r', file], { allowFailure: true }).status === 0
+  )
+}
+
+function resolveClaudeCredentialsFile(identity: InstallIdentity, content: string): string {
+  const explicit = readEnvValue(content, 'CLAUDE_CREDENTIALS_FILE') ?? ''
+  if (explicit !== '') return explicit
+  const configDir =
+    readEnvValue(content, 'CLAUDE_CONFIG_DIR') || path.join(identity.home, '.claude')
+  return path.join(configDir, '.credentials.json')
+}
+
+function isSecureClaudeCredentialsFile(file: string, identity: InstallIdentity): boolean {
+  try {
+    if (fs.lstatSync(file).isSymbolicLink()) return false
+    const stat = fs.statSync(file)
+    return stat.uid === identity.uid && (stat.mode & 0o077) === 0 && (stat.mode & 0o400) !== 0
+  } catch {
+    return false
+  }
+}
+
+function isUsableClaudeCredentialsFile(file: string, identity: InstallIdentity): boolean {
+  try {
+    if (!isSecureClaudeCredentialsFile(file, identity)) return false
+    const parsed: unknown = JSON.parse(fs.readFileSync(file, 'utf8'))
+    if (
+      parsed === null ||
+      typeof parsed !== 'object' ||
+      Array.isArray(parsed) ||
+      !('claudeAiOauth' in parsed) ||
+      parsed.claudeAiOauth === null ||
+      typeof parsed.claudeAiOauth !== 'object' ||
+      Array.isArray(parsed.claudeAiOauth)
+    ) {
+      return false
+    }
+    const oauth = parsed.claudeAiOauth as Record<string, unknown>
+    const accessToken = oauth.accessToken
+    const refreshToken = oauth.refreshToken
+    const hasAccessToken = typeof accessToken === 'string' && accessToken.length > 0
+    const hasRefreshToken = typeof refreshToken === 'string' && refreshToken.length > 0
+    const expiresAt = oauth.expiresAt
+    const refreshTokenExpiresAt = oauth.refreshTokenExpiresAt
+    const validExpiry = (value: unknown): boolean =>
+      value === undefined || value === null || (typeof value === 'number' && Number.isFinite(value))
+    const toEpochMs = (value: number): number => (value < 1_000_000_000_000 ? value * 1000 : value)
+    const accessTokenExpired =
+      typeof expiresAt === 'number' &&
+      Number.isFinite(expiresAt) &&
+      toEpochMs(expiresAt) <= Date.now()
+    const refreshTokenExpired =
+      typeof refreshTokenExpiresAt === 'number' &&
+      Number.isFinite(refreshTokenExpiresAt) &&
+      toEpochMs(refreshTokenExpiresAt) <= Date.now()
+    const usableAccessToken = hasAccessToken && !accessTokenExpired
+    const usableRefreshToken = hasRefreshToken && !refreshTokenExpired
+    const scopes = Array.isArray(oauth.scopes)
+      ? oauth.scopes.every(
+          (scope): scope is string => typeof scope === 'string' && scope.length > 0
+        )
+        ? oauth.scopes
+        : null
+      : typeof oauth.scopes === 'string'
+        ? oauth.scopes.split(/\s+/).filter((scope) => scope.length > 0)
+        : null
+    return (
+      (usableAccessToken || usableRefreshToken) &&
+      validExpiry(expiresAt) &&
+      validExpiry(refreshTokenExpiresAt) &&
+      scopes !== null &&
+      scopes.includes('user:profile')
+    )
+  } catch {
+    return false
+  }
+}
+
 function candidateCliPaths(
   identity: InstallIdentity,
   cli: string,
@@ -426,8 +513,8 @@ function candidateCliPaths(
 function resolveInitialCli(
   runner: CommandRunner,
   identity: InstallIdentity,
-  key: 'CODEX_BIN' | 'CLAUDE_BIN' | 'GROK_BIN',
-  cli: 'codex' | 'claude' | 'grok',
+  key: 'CODEX_BIN' | 'GROK_BIN',
+  cli: 'codex' | 'grok',
   env: NodeJS.ProcessEnv
 ): string {
   const explicit = env[key]
@@ -463,8 +550,21 @@ function validateCollectorEnv(
   const providers = parseProvidersFromEnv(content, label)
   if (mode === 'real') {
     for (const provider of providers) {
-      const key =
-        provider === 'codex' ? 'CODEX_BIN' : provider === 'claude' ? 'CLAUDE_BIN' : 'GROK_BIN'
+      if (provider === 'claude') {
+        const credentialsFile = resolveClaudeCredentialsFile(identity, content)
+        if (!isReadableFileAsUser(runner, identity, credentialsFile)) {
+          deployError(
+            `claude provider is enabled but Claude OAuth credentials are not readable as ${identity.user}: ${credentialsFile}`
+          )
+        }
+        if (!isUsableClaudeCredentialsFile(credentialsFile, identity)) {
+          deployError(
+            `claude provider is enabled but Claude OAuth credentials are invalid or lack the user:profile scope: ${credentialsFile}`
+          )
+        }
+        continue
+      }
+      const key = provider === 'codex' ? 'CODEX_BIN' : 'GROK_BIN'
       const bin = readEnvValue(content, key) ?? ''
       if (!isExecutableAsUser(runner, identity, bin)) {
         deployError(
@@ -496,9 +596,6 @@ export function prepareCollectorEnv(
   if (!source.existing) {
     if (effectiveProviders.includes('codex')) {
       updates.CODEX_BIN = resolveInitialCli(runner, identity, 'CODEX_BIN', 'codex', env)
-    }
-    if (effectiveProviders.includes('claude')) {
-      updates.CLAUDE_BIN = resolveInitialCli(runner, identity, 'CLAUDE_BIN', 'claude', env)
     }
   }
   if (effectiveProviders.includes('grok') && (readEnvValue(content, 'GROK_BIN') ?? '') === '') {

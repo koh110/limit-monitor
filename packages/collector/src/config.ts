@@ -1,3 +1,5 @@
+import os from 'node:os'
+import path from 'node:path'
 import type { Provider } from 'shared/src/contracts'
 import { providerSchema } from 'shared/src/contracts'
 
@@ -18,7 +20,7 @@ export const COLLECTOR_VERSION = '0.1.0' as const
 
 /**
  * collector の動作モード。
- * - `real`(既定): 手元にインストールされた Codex CLI / Claude Code / Grok Build から実値を取得する
+ * - `real`(既定): 手元にインストールされた Codex CLI / Claude Code の OAuth credentials / Grok Build から実値を取得する
  * - `mock`: fixture を送信する。明示的に指定した場合のみ有効
  *
  * 未知の値は起動時に落とす(誤設定を黙って real/mock のどちらかに寄せない)。
@@ -106,9 +108,31 @@ export const COLLECTOR_MODE = resolveCollectorMode(process.env.COLLECTOR_MODE)
 export const PROVIDERS = resolveProviders(process.env.COLLECTOR_PROVIDERS)
 
 // vendor CLI の実行 path。systemd 配下では PATH が細いため明示指定できるようにする
-export const CLAUDE_BIN = process.env.CLAUDE_BIN ?? 'claude'
 export const CODEX_BIN = process.env.CODEX_BIN ?? 'codex'
 export const GROK_BIN = process.env.GROK_BIN ?? 'grok'
+
+// Claude Code の OAuth usage API は Claude Code が保存した credentials を使う。
+// CLAUDE_CONFIG_DIR を指定した場合は Claude Code と同じ配置規則に合わせる。
+export const CLAUDE_CREDENTIALS_FILE =
+  process.env.CLAUDE_CREDENTIALS_FILE ??
+  path.join(
+    process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'),
+    '.credentials.json'
+  )
+export const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage' as const
+export const CLAUDE_OAUTH_TOKEN_URL = 'https://platform.claude.com/v1/oauth/token' as const
+// Claude Code の公開 OAuth client id。secret ではなく、CLI と同じ値を使う。
+export const CLAUDE_OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e' as const
+export const CLAUDE_USAGE_CACHE_FILE =
+  process.env.CLAUDE_USAGE_CACHE_FILE ?? path.join(os.tmpdir(), 'limit-monitor-claude-usage.json')
+export const CLAUDE_USAGE_CACHE_TTL_MS = resolvePositiveInt({
+  raw: process.env.CLAUDE_USAGE_CACHE_TTL_MS,
+  // undocumented endpoint は短時間の polling で 429 になり得るため、Hub の
+  // 通常の trigger 間隔(60秒)より長く cache する。
+  fallback: 5 * 60 * 1000,
+  name: 'CLAUDE_USAGE_CACHE_TTL_MS'
+})
+export const CLAUDE_USAGE_USER_AGENT = process.env.CLAUDE_USAGE_USER_AGENT ?? 'claude-code/2.1.282'
 
 // vendor CLI 実行の有限 timeout。CLI の cold start を見込んで既定 60 秒
 export const COMMAND_TIMEOUT_MS = resolvePositiveInt({

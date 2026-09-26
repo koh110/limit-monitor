@@ -7,7 +7,7 @@
 ```mermaid
 flowchart TD
     C1["Codex Collector"] -->|"normalized observation"| H["Limit Hub (port 8787)"]
-    C2["Claude statusLine / Collector"] -->|"normalized observation"| H
+    C2["Claude OAuth usage API / Collector"] -->|"normalized observation"| H
     H --> DB["SQLite"]
     SD["Stream Deck plugin"] -->|"LAN direct GET"| H
     B["LAN browser (Dashboard SPA)"] -->|"LAN direct CORS fetch"| H
@@ -35,7 +35,8 @@ limit-monitor/
                  # token 管理 CLI、migration
     client/      # Vite + React + react-router Dashboard(SPA、Hub へ直接 CORS fetch)
     collector/   # Agent(WebSocket/reconnect) + one-shot Worker。Worker が
-                 # Codex/Claude CLI から usage を観測し Observation を Hub へ送信
+                 # Codex app-server / Claude OAuth usage API から usage を観測し
+                 # Observation を Hub へ送信
   deploy/systemd/
   docs/
 ```
@@ -53,6 +54,11 @@ limit-monitor/
    - Hub 時刻より 5 分以上未来の `observedAt` は 400 で拒否
 4. `latest_limits`(provider + account_alias + bucket_id が PK)へ upsert する
 5. Dashboard / Stream Deck は `GET /api/v1/status` を取得して表示する
+
+Claude の `weekly_scoped` bucket は、表示用slugだけでなくscopeのcanonical identityのdigestも含む
+bucket IDを使う。これによりopaque model/surface IDの表記揺れ・同一prefix・大小文字違いで
+別scopeが衝突しない。旧 `claude:week:<display-name>` bucketが残っている場合は、Hub ingestが
+canonical bucketの受信時に対応するlegacy aliasを削除して移行する。
 
 ## API 契約(TypeSpec)
 

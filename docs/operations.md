@@ -8,7 +8,8 @@
 - DB 配置先(既定): `/var/lib/limit-monitor/limit-monitor.sqlite`
 - Collectorで選択するproviderに応じた実行環境
   - Codex: install userでCodex CLIへlogin済み
-  - Claude: install userでClaude Codeへlogin済み
+  - Claude: install userでClaude Codeへlogin済み。Collectorは
+    `~/.claude/.credentials.json`のOAuth access tokenを使ってusage APIを読む
   - Grok: install userでGrok CLIへlogin済みで、ACP billing APIを呼び出せること
 
 正規のdeploy入口はリポジトリrootの`./deploy.ts`です。deploy orchestrationはTypeScriptで行い、`npm`、`systemctl`、`runuser`、`systemd-analyze`等の外部コマンドはshell文字列を組み立てず、引数配列で直接実行します。
@@ -71,7 +72,7 @@ sudo ./deploy.ts \
 1. CLI引数のproviderを正規化し、空要素・未知provider・重複を拒否する。
 2. 既存`collector.env`があればそれを読み、activeな重複env keyがないことを確認する。
 3. `COLLECTOR_PROVIDERS`だけを差し替えたcandidateをメモリ上で作る。他の設定・コメントは保持する。
-4. candidateを使って選択providerの検証を行う。Grok-onlyならCodex/Claude CLIは要求しない。
+4. candidateを使って選択providerの検証を行う。Codex/GrokはCLI、ClaudeはOAuth credentials fileを検証する。Grok-onlyならCodex CLI/Claude credentialsは要求しない。
 5. token、systemd unit、state directory等を含むread-only validationをすべて完了する。
 6. validation成功後だけ、candidateを`collector.env`へatomicに配置する。既存mode/ownerは保持する。
 
@@ -91,7 +92,8 @@ Hub / Dashboard / Collectorはすべて、deployを実行した通常ユーザ�
 
 実deployはsystemd操作を行うためrootが必要です。通常は通常ユーザーのshellから`sudo ./deploy.ts ...`として実行してください。uid 0、存在しないuser/group、実在するhome directoryを持たないuserは拒否します。
 
-Codex / Claude CLIの存在確認もこのinstall userとして行います。
+Codex / Grok CLIの存在確認とClaude OAuth credentials fileのreadable・JSON構造・
+`user:profile` scope確認は、このinstall userとして行います。
 
 ## build
 
@@ -147,6 +149,31 @@ sudo install -m 600 /dev/stdin /etc/limit-monitor/collector-token
 - mode `600`
 - trim後に空でない
 
+### Claude usage の認証と取得
+
+Claude の `-p /usage` は非対話時には slash command ではなく通常の prompt として
+処理されるため、CollectorはClaude Codeの undocumented OAuth usage APIを使う。
+事前にCollectorの実行ユーザーで次を実行して credentials を有効にする。
+
+```bash
+claude auth login
+claude auth status --text
+```
+
+Collectorは5分間だけ usage の数値をローカルcacheへ保存するが、OAuth token・本文・
+transcriptは保存しない。`CLAUDE_CREDENTIALS_FILE`でcredentials fileを明示できる。
+credentials fileはCollector実行ユーザー所有で、ownerだけがreadできる mode `600` 相当、
+かつ `user:profile` scopeを含む必要がある。access tokenの有効期限が5分以内になると、
+credentials file内のrefresh tokenでOAuth token endpointを呼び、rotationされたtokenを
+内容fingerprint・inode guard付きのatomic no-replace swapで保存する。
+usage APIが401/403を返した場合も、refresh tokenがあれば一度だけ強制refreshして再試行する。
+refreshはcredentials lock・内容fingerprint・inode guardで同時更新を検知し、Claude Code側の新しい認証情報を
+上書きしない。
+refresh token自体が期限切れ、または更新結果を安全に保存できない場合は値を送らず、
+`claude auth login`が必要な失敗として記録する。
+APIが429を返した場合は同じcache TTLの間再試行を抑制し、Hubの直前の有効値を消さずに
+失敗として記録する。
+
 unitは次の形でtokenを受け取ります。
 
 ```ini
@@ -201,7 +228,7 @@ DB_FILE_PATH=/var/lib/limit-monitor/limit-monitor.sqlite \
 - install user / primary group / home
 - build artifact / production dependency staging
 - managed envのduplicate keyと値
-- provider listと選択したCodex/Claude CLIの実行可能性
+- provider listと選択したCodex/Grok CLIの実行可能性、Claude OAuth credentials fileのreadable・JSON構造・scope
 - Collector token
 - state directory owner/mode
 - systemd unit templateと`systemd-analyze verify`
