@@ -75,7 +75,7 @@ type ClaudeRefreshResult =
       detail: string
     }
 
-const DEFAULT_CLAUDE_USAGE_USER_AGENT = 'claude-code/2.1.282'
+const DEFAULT_CLAUDE_USAGE_USER_AGENT = 'claude-code/2.1.283'
 const DEFAULT_CLAUDE_TOKEN_URL = 'https://platform.claude.com/v1/oauth/token'
 const DEFAULT_CLAUDE_OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
 const TOKEN_REFRESH_SKEW_MS = 5 * 60 * 1000
@@ -572,7 +572,6 @@ async function requestTokenRefresh({
   oauthClientId,
   timeoutMs,
   maxResponseBytes,
-  userAgent,
   nowMs
 }: {
   refreshToken: string
@@ -581,7 +580,6 @@ async function requestTokenRefresh({
   oauthClientId: string
   timeoutMs: number
   maxResponseBytes: number
-  userAgent?: string
   nowMs: number
 }): Promise<ClaudeRefreshResult> {
   let response: Response
@@ -592,8 +590,9 @@ async function requestTokenRefresh({
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
-        'anthropic-beta': 'oauth-2025-04-20',
-        'User-Agent': userAgent ?? DEFAULT_CLAUDE_USAGE_USER_AGENT
+        // Claude Code の usage API 用 User-Agent を token endpoint へ流用すると
+        // Anthropic edge が 429 を返すため、refresh request では明示しない。
+        'anthropic-beta': 'oauth-2025-04-20'
       },
       body: JSON.stringify({
         grant_type: 'refresh_token',
@@ -956,7 +955,6 @@ async function resolveAccessToken({
   oauthClientId,
   timeoutMs,
   maxResponseBytes,
-  userAgent,
   nowMs,
   forceRefresh = false
 }: {
@@ -965,7 +963,6 @@ async function resolveAccessToken({
   oauthClientId?: string
   timeoutMs: number
   maxResponseBytes: number
-  userAgent?: string
   nowMs: number
   forceRefresh?: boolean
 }): Promise<ClaudeCredentialsResult> {
@@ -1063,7 +1060,6 @@ async function resolveAccessToken({
       oauthClientId: oauthClientId ?? DEFAULT_CLAUDE_OAUTH_CLIENT_ID,
       timeoutMs,
       maxResponseBytes,
-      userAgent,
       nowMs
     })
     if (!refreshed.ok) {
@@ -1177,7 +1173,6 @@ export function createClaudeReader(options: ClaudeSourceOptions) {
       oauthClientId: options.oauthClientId,
       timeoutMs: options.timeoutMs,
       maxResponseBytes: options.maxResponseBytes,
-      userAgent: options.userAgent,
       nowMs
     })
     if (!credentials.ok) {
@@ -1216,7 +1211,6 @@ export function createClaudeReader(options: ClaudeSourceOptions) {
         oauthClientId: options.oauthClientId,
         timeoutMs: options.timeoutMs,
         maxResponseBytes: options.maxResponseBytes,
-        userAgent: options.userAgent,
         nowMs,
         forceRefresh: true
       })

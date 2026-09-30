@@ -77,9 +77,11 @@ async function createTokenServer({
 }) {
   let requestBody = ''
   let anthropicBeta = ''
+  let userAgent = ''
   const server = createServer((request, response) => {
     const header = request.headers['anthropic-beta']
     anthropicBeta = Array.isArray(header) ? (header[0] ?? '') : (header ?? '')
+    userAgent = request.headers['user-agent'] ?? ''
     const chunks: Buffer[] = []
     request.on('data', (chunk: Buffer) => chunks.push(chunk))
     request.on('end', () => {
@@ -102,7 +104,8 @@ async function createTokenServer({
   return {
     url: `http://127.0.0.1:${address.port}/v1/oauth/token`,
     requestBody: () => requestBody,
-    anthropicBeta: () => anthropicBeta
+    anthropicBeta: () => anthropicBeta,
+    userAgent: () => userAgent
   }
 }
 
@@ -209,7 +212,40 @@ test('既定 User-Agent は Claude Code client identity を使う', async () => 
   })
   const result = await usageReader({ credentialsFile, cacheFile, usageUrl: server.url })(INPUT)
   expect(result.ok).toBe(true)
-  expect(server.userAgent()).toBe('claude-code/2.1.282')
+  expect(server.userAgent()).toBe('claude-code/2.1.283')
+})
+
+test('OAuth token refresh には usage API 用 User-Agent を流用しない', async () => {
+  const { credentialsFile, cacheFile } = createTestFiles()
+  const now = Date.parse(INPUT.observedAt)
+  writeCredentials(credentialsFile, 'expired-access-token', {
+    refreshToken: 'refresh-token-for-test',
+    expiresAt: now - 1,
+    refreshTokenExpiresAt: now + 30 * 24 * 60 * 60 * 1000
+  })
+  const tokenServer = await createTokenServer({
+    body: {
+      access_token: 'refreshed-access-token',
+      refresh_token: 'rotated-refresh-token',
+      expires_in: 3600
+    }
+  })
+  const usageServer = await createUsageServer({
+    body: { five_hour: { utilization: 11 } }
+  })
+  const usageUserAgent = 'claude-code/test-usage-user-agent'
+  const result = await usageReader({
+    credentialsFile,
+    cacheFile,
+    usageUrl: usageServer.url,
+    tokenUrl: tokenServer.url,
+    userAgent: usageUserAgent,
+    now: () => now
+  })(INPUT)
+  expect(result.ok).toBe(true)
+  expect(JSON.parse(tokenServer.requestBody())).toMatchObject({ grant_type: 'refresh_token' })
+  expect(usageServer.userAgent()).toBe(usageUserAgent)
+  expect(tokenServer.userAgent()).not.toMatch(/^claude-code\//)
 })
 
 test('期限切れの access token は OAuth refresh で更新し、rotation された token を保存する', async () => {

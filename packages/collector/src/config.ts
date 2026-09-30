@@ -132,7 +132,7 @@ export const CLAUDE_USAGE_CACHE_TTL_MS = resolvePositiveInt({
   fallback: 5 * 60 * 1000,
   name: 'CLAUDE_USAGE_CACHE_TTL_MS'
 })
-export const CLAUDE_USAGE_USER_AGENT = process.env.CLAUDE_USAGE_USER_AGENT ?? 'claude-code/2.1.282'
+export const CLAUDE_USAGE_USER_AGENT = process.env.CLAUDE_USAGE_USER_AGENT ?? 'claude-code/2.1.283'
 
 // vendor CLI 実行の有限 timeout。CLI の cold start を見込んで既定 60 秒
 export const COMMAND_TIMEOUT_MS = resolvePositiveInt({
