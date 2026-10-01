@@ -109,6 +109,8 @@ export const PROVIDERS = resolveProviders(process.env.COLLECTOR_PROVIDERS)
 
 // vendor CLI の実行 path。systemd 配下では PATH が細いため明示指定できるようにする
 export const CODEX_BIN = process.env.CODEX_BIN ?? 'codex'
+export const CLAUDE_BIN =
+  process.env.CLAUDE_BIN ?? path.join(os.homedir(), '.local', 'bin', 'claude')
 export const GROK_BIN = process.env.GROK_BIN ?? 'grok'
 
 // Claude Code の OAuth usage API は Claude Code が保存した credentials を使う。
@@ -132,7 +134,9 @@ export const CLAUDE_USAGE_CACHE_TTL_MS = resolvePositiveInt({
   fallback: 5 * 60 * 1000,
   name: 'CLAUDE_USAGE_CACHE_TTL_MS'
 })
-export const CLAUDE_USAGE_USER_AGENT = process.env.CLAUDE_USAGE_USER_AGENT ?? 'claude-code/2.1.283'
+// 通常は CLI の `--version` から実行時に組み立てる。明示値は障害時の override 用。
+export const CLAUDE_USAGE_USER_AGENT =
+  process.env.CLAUDE_USAGE_USER_AGENT?.trim() || undefined
 
 // vendor CLI 実行の有限 timeout。CLI の cold start を見込んで既定 60 秒
 export const COMMAND_TIMEOUT_MS = resolvePositiveInt({

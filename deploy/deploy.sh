@@ -1013,7 +1013,7 @@ validate_collector_credential_wiring() {
 # (Major 1)。env の値を未検証のまま --install-systemd へ進めない:
 #   - real mode 以外(mock)では vendor runtime を使わないため対象外にできる
 #   - COLLECTOR_PROVIDERS で無効な provider の CLI は対象外
-#   - Codex/Grok CLI は絶対 path として INSTALL_USER 環境で実行可能で存在すること
+#   - Codex/Claude CLI は絶対 path として INSTALL_USER 環境で実行可能で存在すること
 #     を確認する(systemd 配下は PATH が細い。bare command 名や slash 付き
 #     相対 path は PATH 依存・CWD 依存で再現できないため一律に拒否する)
 # 戻り値: 0 = 検証通過 / 非ゼロ = 拒否(呼び出し側が die)
@@ -1129,7 +1129,7 @@ effective_collector_providers() {
 #      解釈される(存在しない shell として失敗する)ため、shell を明示して
 #      その中に command -v を実行する安全形式へ統一する)
 #   - 解決できない(CLI 不在)は非ゼロ終了(呼び出し側が die)
-# $1 = 呼び出し元 env の key(CODEX_BIN / GROK_BIN)、$2 = CLI 名(codex / grok)
+# $1 = 呼び出し元 env の key(CODEX_BIN / CLAUDE_BIN)、$2 = CLI 名(codex / claude)
 resolve_collector_cli_path() {
   local env_key="$1"
   local cli="$2"
@@ -1150,15 +1150,15 @@ resolve_collector_cli_path() {
 }
 
 # 初回 install(collector.env 未作成)用の temp collector.env に、解決済み CLI
-# path を render する。example の固定 CODEX_BIN/GROK_BIN(/usr/local/bin/...)
+# path を render する。example の固定 CODEX_BIN/CLAUDE_BIN(/usr/local/bin/...)
 # はそのまま検証してはいけない(実環境に無い path で false failure になる)。
 # INSTALL_USER として解決した実際の path を temp env へ render してから
-# validate_collector_binaries に渡す。呼び出し元 env の CODEX_BIN/GROK_BIN
+# validate_collector_binaries に渡す。呼び出し元 env の CODEX_BIN/CLAUDE_BIN
 # は優先する。CLI 不在は die(fail-closed)。
 # $1 = render 済み temp collector.env の path
 render_initial_collector_cli_bins() {
   local temp_env="$1"
-  local providers codex_path
+  local providers codex_path claude_path
   if [[ -n "${DEPLOY_COLLECTOR_PROVIDERS:-}" ]]; then
     providers="${DEPLOY_COLLECTOR_PROVIDERS}"
   else
@@ -1172,6 +1172,14 @@ render_initial_collector_cli_bins() {
       || die "codex CLI not found in ${INSTALL_USER} environment (resolve: runuser -u ${INSTALL_USER} -- <user_shell> -lc 'command -v -- codex')"
     sed -i "s|^CODEX_BIN=.*|CODEX_BIN=${codex_path}|" "$temp_env"
     log "initial install: rendered resolved Codex CLI path into temp env (CODEX_BIN=${codex_path})"
+  fi
+  if provider_list_has "claude" "$providers"; then
+    claude_path="$(resolve_collector_cli_path CLAUDE_BIN claude)" \
+      || die "claude CLI not found in ${INSTALL_USER} environment (resolve: runuser -u ${INSTALL_USER} -- <user_shell> -lc 'command -v -- claude')"
+    sed -i "s|^CLAUDE_BIN=.*|CLAUDE_BIN=${claude_path}|" "$temp_env"
+    grep -qxF "CLAUDE_BIN=${claude_path}" "$temp_env" \
+      || die "failed to render CLAUDE_BIN into initial collector env"
+    log "initial install: rendered resolved Claude CLI path into temp env (CLAUDE_BIN=${claude_path})"
   fi
 }
 
@@ -1260,13 +1268,25 @@ validate_collector_binaries() {
   fi
 
   if provider_list_has "claude" "$providers"; then
-    local credentials_file config_dir install_home
+    local credentials_file config_dir install_home claude_bin claude_version
+    install_home="$(getent passwd "${INSTALL_USER}" | cut -d: -f6)"
+    [[ -n "$install_home" ]] \
+      || die "cannot resolve ${INSTALL_USER} home while locating Claude CLI and OAuth credentials"
+    claude_bin="$(read_env_value "$env_file" CLAUDE_BIN '')"
+    [[ -n "$claude_bin" ]] || claude_bin="${install_home}/.local/bin/claude"
+    [[ "$claude_bin" == /* ]] \
+      || die "CLAUDE_BIN must be an absolute path (bare command names and relative paths are not accepted; got: ${claude_bin}). Set it to an absolute path resolved as ${INSTALL_USER}: runuser -u ${INSTALL_USER} -- <user_shell> -lc 'command -v -- claude'"
+    resolve_collector_bin_as_user "$claude_bin" \
+      || die "CLAUDE_BIN is not an executable in the ${INSTALL_USER} environment: ${claude_bin} (set an absolute path resolved as ${INSTALL_USER}: runuser -u ${INSTALL_USER} -- <user_shell> -lc 'command -v -- claude')"
+    claude_version="$(runuser -u "${INSTALL_USER}" -- "$claude_bin" --version 2>/dev/null)" \
+      || die "CLAUDE_BIN --version failed for ${INSTALL_USER}: ${claude_bin}"
+    [[ "$claude_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?[[:space:]]+\(Claude[[:space:]]Code\)$ ]] \
+      || die "CLAUDE_BIN returned an unsupported version format for ${INSTALL_USER}: ${claude_bin}"
+    log "verified claude CLI for ${INSTALL_USER}: ${claude_bin}"
+
     credentials_file="$(read_env_value "$env_file" CLAUDE_CREDENTIALS_FILE '')"
     if [[ -z "$credentials_file" ]]; then
       config_dir="$(read_env_value "$env_file" CLAUDE_CONFIG_DIR '')"
-      install_home="$(getent passwd "${INSTALL_USER}" | cut -d: -f6)"
-      [[ -n "$install_home" ]] \
-        || die "cannot resolve ${INSTALL_USER} home while locating Claude OAuth credentials"
       [[ -n "$config_dir" ]] || config_dir="${install_home}/.claude"
       credentials_file="${config_dir}/.credentials.json"
     fi

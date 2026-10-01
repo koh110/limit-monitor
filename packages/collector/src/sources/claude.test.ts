@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, expect, test } from 'vite-plus/test'
 import { createClaudeReader } from './claude.js'
+import { createFakeBinary } from './test-binary.js'
 
 const INPUT = { sourceId: 'dev-machine', observedAt: '2026-09-01T11:36:47.683Z' }
 
@@ -130,6 +131,7 @@ function usageReader({
   now = () => Date.parse(INPUT.observedAt),
   cacheTtlMs = 300_000,
   userAgent,
+  command,
   tokenUrl
 }: {
   credentialsFile: string
@@ -138,6 +140,7 @@ function usageReader({
   now?: () => number
   cacheTtlMs?: number
   userAgent?: string
+  command?: string
   tokenUrl?: string
 }) {
   return createClaudeReader({
@@ -148,7 +151,8 @@ function usageReader({
     cacheTtlMs,
     timeoutMs: 10_000,
     maxResponseBytes: 1024 * 1024,
-    userAgent,
+    userAgent: userAgent ?? (command ? undefined : 'claude-cli/test (external, cli)'),
+    command,
     now
   })
 }
@@ -204,15 +208,43 @@ test('OAuth usage API の実測形式から Observation を作る', async () => 
   expect(fs.readFileSync(cacheFile, 'utf8')).not.toContain('token-for-test')
 })
 
-test('既定 User-Agent は Claude Code client identity を使う', async () => {
+test('usage User-Agent は Claude CLI の実行時 version に追従する', async () => {
   const { credentialsFile, cacheFile } = createTestFiles()
   writeCredentials(credentialsFile, 'token-for-test')
+  const fake = createFakeBinary(`
+if (process.argv[2] !== '--version') process.exit(2)
+process.stdout.write('9.8.7 (Claude Code)\\n')
+`)
+  cleanups.push(fake.cleanup)
   const server = await createUsageServer({
     body: { five_hour: { utilization: 11 } }
   })
-  const result = await usageReader({ credentialsFile, cacheFile, usageUrl: server.url })(INPUT)
+  const result = await usageReader({
+    credentialsFile,
+    cacheFile,
+    usageUrl: server.url,
+    command: fake.command
+  })(INPUT)
   expect(result.ok).toBe(true)
-  expect(server.userAgent()).toBe('claude-code/2.1.283')
+  expect(server.userAgent()).toBe('claude-cli/9.8.7 (external, cli)')
+})
+
+test('Claude CLI version を安全に解釈できない場合は固定値へ fallback しない', async () => {
+  const { credentialsFile, cacheFile } = createTestFiles()
+  writeCredentials(credentialsFile, 'token-for-test')
+  const fake = createFakeBinary(`process.stdout.write('future-version\\n')`)
+  cleanups.push(fake.cleanup)
+  const server = await createUsageServer({
+    body: { five_hour: { utilization: 11 } }
+  })
+  const result = await usageReader({
+    credentialsFile,
+    cacheFile,
+    usageUrl: server.url,
+    command: fake.command
+  })(INPUT)
+  expect(result).toMatchObject({ ok: false, reason: 'claude_version_invalid' })
+  expect(server.requestCount()).toBe(0)
 })
 
 test('OAuth token refresh には usage API 用 User-Agent を流用しない', async () => {

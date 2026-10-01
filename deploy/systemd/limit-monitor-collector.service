@@ -9,8 +9,8 @@
 # ExecStart の node path(/usr/bin/node)は deploy.ts が実行環境の実際の path へ
 # 置換して render・配置する。手動で配置する場合は実 path へ書き換えること。
 #
-# 重要: real mode の collector は `codex` / `grok` CLIを実行し、Claude は
-# HOME 配下の OAuth credentials を読む。そのため
+# 重要: real mode の collector は `codex` / `claude` CLIを実行し、Claude は
+# HOME 配下の OAuth credentials も読む。そのため
 #   - User= / Group= は Codex login 済み、Claude OAuth credentials を所有するアカウントにすること
 #     (= deploy を実行した通常ユーザー。install user が collector を動かす)
 #   - ProtectHome= は有効にできない(Codex CLI / Claude credentials が HOME を読む)

@@ -162,6 +162,10 @@ claude auth status --text
 
 Collectorは5分間だけ usage の数値をローカルcacheへ保存するが、OAuth token・本文・
 transcriptは保存しない。`CLAUDE_CREDENTIALS_FILE`でcredentials fileを明示できる。
+usage APIへ送るUser-Agentは`CLAUDE_BIN --version`から実行時に組み立てるため、Claude
+Codeの更新後も固定versionは残らない。native installの既定pathは
+`$HOME/.local/bin/claude`で、それ以外は`CLAUDE_BIN`に絶対pathを指定する。
+`CLAUDE_USAGE_USER_AGENT`は障害時の明示overrideであり、通常は設定しない。
 credentials fileはCollector実行ユーザー所有で、ownerだけがreadできる mode `600` 相当、
 かつ `user:profile` scopeを含む必要がある。access tokenの有効期限が5分以内になると、
 credentials file内のrefresh tokenでOAuth token endpointを呼び、rotationされたtokenを

@@ -6,6 +6,7 @@ import {
   parseClaudeUsagePayload,
   type ClaudeUsageLimit
 } from '../adapters/claude-usage.js'
+import { runCommand } from '../lib/run-command.js'
 import type { ProviderReadInput, ProviderReadResult } from './types.js'
 
 export type ClaudeSourceOptions = {
@@ -16,6 +17,7 @@ export type ClaudeSourceOptions = {
   maxResponseBytes: number
   cacheTtlMs: number
   userAgent?: string
+  command?: string
   tokenUrl?: string
   oauthClientId?: string
   now?: () => number
@@ -75,7 +77,6 @@ type ClaudeRefreshResult =
       detail: string
     }
 
-const DEFAULT_CLAUDE_USAGE_USER_AGENT = 'claude-code/2.1.283'
 const DEFAULT_CLAUDE_TOKEN_URL = 'https://platform.claude.com/v1/oauth/token'
 const DEFAULT_CLAUDE_OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
 const TOKEN_REFRESH_SKEW_MS = 5 * 60 * 1000
@@ -83,6 +84,65 @@ const REQUIRED_CLAUDE_USAGE_SCOPE = 'user:profile'
 const CREDENTIAL_LOCK_WAIT_MS = 50
 const CREDENTIAL_LOCK_TIMEOUT_MS = 10 * 1000
 const CREDENTIAL_LOCK_STALE_MS = 5 * 60 * 1000
+
+type ClaudeUserAgentResult =
+  | { ok: true; userAgent: string }
+  | { ok: false; reason: 'claude_version_unavailable' | 'claude_version_invalid'; detail: string }
+
+const CLAUDE_VERSION_OUTPUT = /^(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?) \(Claude Code\)$/
+
+async function resolveClaudeUsageUserAgent({
+  userAgent,
+  command,
+  timeoutMs,
+  maxStdoutBytes
+}: {
+  userAgent?: string
+  command?: string
+  timeoutMs: number
+  maxStdoutBytes: number
+}): Promise<ClaudeUserAgentResult> {
+  if (userAgent !== undefined) {
+    const value = userAgent.trim()
+    if (value.length === 0 || /[^\x20-\x7e]/.test(value)) {
+      return {
+        ok: false,
+        reason: 'claude_version_invalid',
+        detail: 'CLAUDE_USAGE_USER_AGENT must be a non-empty printable ASCII value'
+      }
+    }
+    return { ok: true, userAgent: value }
+  }
+  if (!command) {
+    return {
+      ok: false,
+      reason: 'claude_version_unavailable',
+      detail: 'CLAUDE_BIN is required when CLAUDE_USAGE_USER_AGENT is not set'
+    }
+  }
+  const version = await runCommand({
+    command,
+    args: ['--version'],
+    timeoutMs,
+    maxStdoutBytes
+  })
+  if (!version.ok) {
+    return {
+      ok: false,
+      reason: 'claude_version_unavailable',
+      detail: `failed to read Claude CLI version: ${version.detail}`
+    }
+  }
+  const match = CLAUDE_VERSION_OUTPUT.exec(version.stdout.trim())
+  if (!match?.[1]) {
+    return {
+      ok: false,
+      reason: 'claude_version_invalid',
+      detail: 'Claude CLI returned an unsupported version format'
+    }
+  }
+  return { ok: true, userAgent: `claude-cli/${match[1]} (external, cli)` }
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -491,7 +551,7 @@ async function requestUsage({
   usageUrl: string
   timeoutMs: number
   maxResponseBytes: number
-  userAgent?: string
+  userAgent: string
 }): Promise<ClaudeApiResult> {
   let response: Response
   try {
@@ -501,7 +561,7 @@ async function requestUsage({
       headers: {
         Accept: 'application/json',
         Authorization: `Bearer ${accessToken}`,
-        'User-Agent': userAgent ?? DEFAULT_CLAUDE_USAGE_USER_AGENT,
+        'User-Agent': userAgent,
         'anthropic-beta': 'oauth-2025-04-20'
       }
     })
@@ -1147,6 +1207,17 @@ function markBackoff({
  * 毎分叩かない。cache には usage 数値だけを保存し OAuth token は保存しない。
  */
 export function createClaudeReader(options: ClaudeSourceOptions) {
+  let userAgentPromise: Promise<ClaudeUserAgentResult> | null = null
+  const usageUserAgent = () => {
+    userAgentPromise ??= resolveClaudeUsageUserAgent({
+      userAgent: options.userAgent,
+      command: options.command,
+      timeoutMs: options.timeoutMs,
+      maxStdoutBytes: options.maxResponseBytes
+    })
+    return userAgentPromise
+  }
+
   return async ({ sourceId, observedAt }: ProviderReadInput): Promise<ProviderReadResult> => {
     const nowMs = options.now?.() ?? Date.now()
     const cache = readUsageCache(options.cacheFile)
@@ -1193,12 +1264,20 @@ export function createClaudeReader(options: ClaudeSourceOptions) {
         detail: 'Claude OAuth access token is missing after credential refresh'
       }
     }
+    const resolvedUserAgent = await usageUserAgent()
+    if (!resolvedUserAgent.ok) {
+      writeUsageCache(
+        options.cacheFile,
+        markBackoff({ cache, nowMs, cacheTtlMs: options.cacheTtlMs })
+      )
+      return resolvedUserAgent
+    }
     let api = await requestUsage({
       accessToken: credentials.credentials.accessToken,
       usageUrl: options.usageUrl,
       timeoutMs: options.timeoutMs,
       maxResponseBytes: options.maxResponseBytes,
-      userAgent: options.userAgent
+      userAgent: resolvedUserAgent.userAgent
     })
     if (
       !api.ok &&
@@ -1238,7 +1317,7 @@ export function createClaudeReader(options: ClaudeSourceOptions) {
         usageUrl: options.usageUrl,
         timeoutMs: options.timeoutMs,
         maxResponseBytes: options.maxResponseBytes,
-        userAgent: options.userAgent
+        userAgent: resolvedUserAgent.userAgent
       })
     }
     if (!api.ok) {
