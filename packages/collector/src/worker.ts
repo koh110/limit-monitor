@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import type { ProviderOutcome, ProviderReaders } from './collect.js'
 import { collectObservations, selectReaders } from './collect.js'
 import {
+  CLAUDE_BIN,
   CLAUDE_CREDENTIALS_FILE,
   CLAUDE_OAUTH_CLIENT_ID,
   CLAUDE_OAUTH_TOKEN_URL,
@@ -51,6 +52,7 @@ function createRealReaders(): ProviderReaders {
       clientVersion: COLLECTOR_VERSION
     }),
     claude: createClaudeReader({
+      command: CLAUDE_BIN,
       credentialsFile: CLAUDE_CREDENTIALS_FILE,
       usageUrl: CLAUDE_USAGE_URL,
       tokenUrl: CLAUDE_OAUTH_TOKEN_URL,
