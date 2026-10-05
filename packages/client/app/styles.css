@@ -9,6 +9,24 @@
   --red: #e5534b;
   --gray: #6e7b8a;
   --darkgray: #3d4650;
+  /* Radix Colors dark scale step 11: high-contrast accents for dark surfaces. */
+  /* https://www.radix-ui.com/colors/docs/palette-composition/composing-a-palette */
+  --ring-red: #ff9592;
+  --ring-cyan: #4ccce6;
+  --ring-lime: #bde56c;
+  --ring-purple: #d19dff;
+  --ring-orange: #ffa057;
+  --ring-blue: #70b8ff;
+  --ring-pink: #ff8dcc;
+  --ring-green: #3dd68c;
+  --ring-yellow: #f5e147;
+  --ring-violet: #baa7ff;
+  --ring-amber: #ffca16;
+  --ring-teal: #0bd8b6;
+  --ring-sky: #75c7f0;
+  --ring-indigo: #9eb1ff;
+  --ring-grass: #71d083;
+  --ring-mint: #58d5ba;
 }
 
 * {
@@ -137,6 +155,7 @@ body {
 }
 
 .card {
+  container-type: inline-size;
   background: var(--panel);
   border: 1px solid var(--panel-border);
   border-radius: 12px;
@@ -268,30 +287,256 @@ body {
   .refresh-icon-spinning {
     animation: none;
   }
+
+  .bucket-ring-progress {
+    transition: none;
+  }
 }
 
-.buckets {
+.bucket-overview {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+}
+
+.bucket-rings {
+  position: relative;
+  width: 112px;
+  aspect-ratio: 1;
+}
+
+.bucket-ring {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+.bucket-ring-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.bucket-ring-track,
+.bucket-ring-progress {
+  fill: none;
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
+}
+
+.bucket-ring-track {
+  stroke: var(--darkgray);
+  opacity: 0.7;
+}
+
+.bucket-ring-progress {
+  stroke-linecap: round;
+  transition: stroke-dasharray 220ms ease;
+}
+
+.bucket-legend {
+  min-width: 0;
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 16px;
 }
 
-.bucket {
-  border-top: 1px solid var(--panel-border);
-  padding-top: 12px;
+.bucket-legend-item {
+  min-width: 0;
+  border-bottom: 1px solid rgba(42, 50, 60, 0.75);
 }
 
-.bucket-head {
+.bucket-legend-item:last-child {
+  border-bottom: 0;
+}
+
+.bucket-detail {
+  min-width: 0;
+  padding-left: 8px;
+  border-left: 2px solid transparent;
+}
+
+.bucket-legend-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.bucket-order-actions {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: row;
+  gap: 2px;
+  padding-top: 5px;
 }
 
-.bucket-label {
+.bucket-order-button {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  line-height: 1;
+}
+
+.bucket-order-button:hover:not(:disabled) {
+  border-color: var(--text-dim);
+  color: var(--text);
+}
+
+.bucket-order-button:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 1px;
+}
+
+.bucket-order-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.bucket-legend-summary {
+  position: relative;
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 18px 7px 0;
+  cursor: pointer;
+  list-style: none;
+}
+
+.bucket-legend-summary::-webkit-details-marker {
+  display: none;
+}
+
+.bucket-legend-summary::after {
+  content: '›';
+  position: absolute;
+  top: 50%;
+  right: 2px;
+  color: var(--text-dim);
+  font-size: 1.1rem;
+  line-height: 1;
+  transform: translateY(-50%);
+}
+
+.bucket-detail[open] .bucket-legend-summary::after {
+  content: '⌄';
+}
+
+.bucket-legend-summary:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.bucket-detail[open] .bucket-meta {
+  margin: 0;
+  padding: 2px 0 10px;
+}
+
+.bucket-legend-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.bucket-legend-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bucket-legend-value {
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.bucket-color-0 {
+  --bucket-ring-color: var(--ring-red);
+}
+
+.bucket-color-1 {
+  --bucket-ring-color: var(--ring-cyan);
+}
+
+.bucket-color-2 {
+  --bucket-ring-color: var(--ring-lime);
+}
+
+.bucket-color-3 {
+  --bucket-ring-color: var(--ring-purple);
+}
+
+.bucket-color-4 {
+  --bucket-ring-color: var(--ring-orange);
+}
+
+.bucket-color-5 {
+  --bucket-ring-color: var(--ring-blue);
+}
+
+.bucket-color-6 {
+  --bucket-ring-color: var(--ring-pink);
+}
+
+.bucket-color-7 {
+  --bucket-ring-color: var(--ring-green);
+}
+
+.bucket-color-8 {
+  --bucket-ring-color: var(--ring-yellow);
+}
+
+.bucket-color-9 {
+  --bucket-ring-color: var(--ring-violet);
+}
+
+.bucket-color-10 {
+  --bucket-ring-color: var(--ring-amber);
+}
+
+.bucket-color-11 {
+  --bucket-ring-color: var(--ring-teal);
+}
+
+.bucket-color-12 {
+  --bucket-ring-color: var(--ring-sky);
+}
+
+.bucket-color-13 {
+  --bucket-ring-color: var(--ring-indigo);
+}
+
+.bucket-color-14 {
+  --bucket-ring-color: var(--ring-grass);
+}
+
+.bucket-color-15 {
+  --bucket-ring-color: var(--ring-mint);
+}
+
+.bucket-ring-progress {
+  stroke: var(--bucket-ring-color);
+}
+
+.bucket-legend-swatch,
+.bucket-legend-value {
+  color: var(--bucket-ring-color);
 }
 
 .freshness {
@@ -312,22 +557,9 @@ body {
   border-color: var(--red);
 }
 
-.remaining {
-  margin: 8px 0 4px;
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
 .remaining-caption {
   font-size: 0.8rem;
   color: var(--text-dim);
-}
-
-.remaining-value {
-  font-size: 2rem;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
 }
 
 .reached {
@@ -338,62 +570,31 @@ body {
   padding: 2px 8px;
 }
 
-.meter {
-  height: 8px;
-  border-radius: 999px;
-  background: var(--darkgray);
-  overflow: hidden;
+.tone-green.bucket-detail {
+  border-left-color: var(--green);
 }
 
-.meter-fill {
-  height: 100%;
-  border-radius: 999px;
+.tone-yellow.bucket-detail {
+  border-left-color: var(--yellow);
 }
 
-/* 仕様 9.2 の表示ルール: 残量ベースの色 + stale/expired はグレー */
-.tone-green .remaining-value,
-.tone-green .meter-fill {
-  color: var(--green);
-  background: var(--green);
+.tone-red.bucket-detail {
+  border-left-color: var(--red);
 }
 
-.tone-yellow .remaining-value,
-.tone-yellow .meter-fill {
-  color: var(--yellow);
-  background: var(--yellow);
+.tone-gray.bucket-detail {
+  border-left-color: var(--gray);
 }
 
-.tone-red .remaining-value,
-.tone-red .meter-fill {
-  color: var(--red);
-  background: var(--red);
-}
-
-.tone-gray .remaining-value,
-.tone-gray .meter-fill {
-  color: var(--gray);
-  background: var(--gray);
-}
-
-.tone-darkgray .remaining-value,
-.tone-darkgray .meter-fill {
-  color: var(--darkgray);
-  background: var(--darkgray);
-}
-
-.tone-green .remaining-value,
-.tone-yellow .remaining-value,
-.tone-red .remaining-value,
-.tone-gray .remaining-value,
-.tone-darkgray .remaining-value {
-  background: none;
+.tone-darkgray.bucket-detail {
+  border-left-color: var(--darkgray);
 }
 
 .bucket-meta {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
-  margin: 12px 0 0;
+  margin: 0;
   font-size: 0.75rem;
 }
 
@@ -434,4 +635,23 @@ body {
 
 .empty-hint {
   font-size: 0.75rem;
+}
+
+@container (max-width: 360px) {
+  .bucket-overview {
+    grid-template-columns: 96px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .bucket-rings {
+    width: 96px;
+  }
+
+  .bucket-legend-item {
+    font-size: 0.75rem;
+  }
+
+  .bucket-legend-summary {
+    gap: 6px;
+  }
 }

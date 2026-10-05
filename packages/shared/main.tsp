@@ -2,6 +2,7 @@ import "@typespec/http";
 import "@typespec/openapi";
 import "./typespec/health.tsp";
 import "./typespec/observations.tsp";
+import "./typespec/preferences.tsp";
 import "./typespec/refresh.tsp";
 import "./typespec/status.tsp";
 

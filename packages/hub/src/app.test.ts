@@ -1,4 +1,5 @@
 import { ingestResultSchema, statusResponseSchema } from 'shared/src/contracts'
+import { accountBucketOrders } from 'shared/src/db/schema'
 import { expect, test } from 'vite-plus/test'
 import * as z from 'zod/mini'
 import { createTestDb } from '../test/util.js'
@@ -43,6 +44,25 @@ function postObservation({
 }) {
   return app.request('/api/v1/observations', {
     method: 'POST',
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  })
+}
+
+function putBucketOrder({
+  app,
+  token,
+  payload
+}: {
+  app: ReturnType<typeof createApp>
+  token?: string
+  payload: Record<string, unknown>
+}) {
+  return app.request('/api/v1/preferences/bucket-order', {
+    method: 'PUT',
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       'Content-Type': 'application/json'
@@ -228,6 +248,68 @@ test('正常な ingest 後に status API へ反映される', async () => {
   expect(body.accounts[0]?.accountAlias).toBe('default')
   expect(body.accounts[0]?.buckets[0]?.bucketId).toBe('codex:primary')
   expect(body.accounts[0]?.buckets[0]?.freshness).toBe('fresh')
+  cleanup()
+})
+
+test('保存した bucket 表示順が SQLite 経由で status API に反映される', async () => {
+  const { db, cleanup } = createTestDb()
+  const app = createApp({ db, refreshApiToken: 'dashboard-secret' })
+  const issued = await issueToken({ db, sourceId: 'dev-machine', accountAlias: 'default', now })
+  const posted = await postObservation({
+    app,
+    token: issued.token,
+    payload: createPayload({
+      buckets: [
+        {
+          bucketId: 'codex:primary',
+          label: '5h',
+          usedPercent: 20,
+          remainingPercent: 80
+        },
+        {
+          bucketId: 'codex:secondary',
+          label: '7d',
+          usedPercent: 60,
+          remainingPercent: 40
+        }
+      ]
+    })
+  })
+  expect(posted.status).toBe(200)
+
+  const unauthorized = await putBucketOrder({
+    app,
+    payload: {
+      provider: 'codex',
+      accountAlias: 'default',
+      bucketOrder: ['codex:secondary', 'codex:primary']
+    }
+  })
+  expect(unauthorized.status).toBe(401)
+
+  const saved = await putBucketOrder({
+    app,
+    token: 'dashboard-secret',
+    payload: {
+      provider: 'codex',
+      accountAlias: 'default',
+      bucketOrder: ['codex:secondary', 'codex:primary']
+    }
+  })
+  expect(saved.status).toBe(200)
+  const savedBody = z.object({ bucketOrder: z.array(z.string()) }).parse(await saved.json())
+  expect(savedBody.bucketOrder).toEqual(['codex:secondary', 'codex:primary'])
+  const [storedPreference] = await db.select().from(accountBucketOrders)
+  expect(storedPreference?.bucketOrder).toBe('["codex:secondary","codex:primary"]')
+
+  const reloadedApp = createApp({ db, refreshApiToken: 'dashboard-secret' })
+  const status = await reloadedApp.request('/api/v1/status')
+  expect(status.status).toBe(200)
+  const body = statusResponseSchema.parse(await status.json())
+  expect(body.accounts[0]?.buckets.map((bucket) => bucket.bucketId)).toEqual([
+    'codex:secondary',
+    'codex:primary'
+  ])
   cleanup()
 })
 

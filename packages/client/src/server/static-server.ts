@@ -34,6 +34,8 @@ const DEFAULT_CONTENT_TYPE = 'application/octet-stream' as const
 const IMMUTABLE_CACHE_CONTROL = 'public, max-age=31536000, immutable' as const
 const REFRESH_PROXY_PATH = '/api/v1/refresh-requests' as const
 const REFRESH_PROXY_BODY_LIMIT_BYTES = 8 * 1024
+const BUCKET_ORDER_PROXY_PATH = '/api/v1/preferences/bucket-order' as const
+const BUCKET_ORDER_PROXY_BODY_LIMIT_BYTES = 8 * 1024
 const REFRESH_PROXY_TIMEOUT_MS = 10_000
 
 export function contentTypeOf(filePath: string) {
@@ -167,13 +169,13 @@ function sendFile({ res, method, root, filePath, size }: SendFileOptions) {
   stream.pipe(res)
 }
 
-async function readLimitedBody(req: http.IncomingMessage) {
+async function readLimitedBody(req: http.IncomingMessage, maxBytes: number) {
   const chunks: Buffer[] = []
   let total = 0
   for await (const chunk of req) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
     total += buffer.byteLength
-    if (total > REFRESH_PROXY_BODY_LIMIT_BYTES) {
+    if (total > maxBytes) {
       return null
     }
     chunks.push(buffer)
@@ -182,12 +184,12 @@ async function readLimitedBody(req: http.IncomingMessage) {
 }
 
 /**
- * refresh proxy は server-side の HUB_REFRESH_TOKEN を注入して Hub を叩くため、
- * CSRF(confused deputy)に耐えなければならない。ブラウザは same-origin POST
+ * Dashboard の書き込み proxy は server-side の HUB_REFRESH_TOKEN を注入して Hub を叩くため、
+ * CSRF(confused deputy)に耐えなければならない。ブラウザは same-origin POST/PUT
  * でも必ず Origin / Sec-Fetch-Site を付ける(非ブラウザの curl 等からは付かない)
  * ため、両者が付いていなければ fail closed で拒否する。
  */
-function isSameOriginRefreshRequest(req: http.IncomingMessage) {
+function isSameOriginWriteRequest(req: http.IncomingMessage) {
   const secFetchSite = req.headers['sec-fetch-site']
   if (typeof secFetchSite === 'string') {
     return secFetchSite === 'same-origin'
@@ -207,35 +209,41 @@ function isSameOriginRefreshRequest(req: http.IncomingMessage) {
   }
 }
 
-async function proxyRefreshRequest({
+async function proxyHubJsonRequest({
   req,
   res,
   hubUrl,
-  hubRefreshToken
+  hubRefreshToken,
+  upstreamPath,
+  upstreamMethod,
+  bodyLimitBytes
 }: {
   req: http.IncomingMessage
   res: http.ServerResponse
   hubUrl: string
   hubRefreshToken: string | null
+  upstreamPath: string
+  upstreamMethod: 'POST' | 'PUT'
+  bodyLimitBytes: number
 }) {
   if (hubRefreshToken === null) {
     sendText({
       res,
-      method: req.method ?? 'POST',
+      method: req.method ?? upstreamMethod,
       status: 503,
-      body: 'Refresh proxy is not configured'
+      body: 'Dashboard proxy is not configured'
     })
     return
   }
 
-  // 他サイトからの POST は Hub を介した refresh を発行できないようにする。
+  // 他サイトからの書き込みは Hub へ転送できないようにする。
   // 許可前に body を読まずに socket を切る。
-  if (!isSameOriginRefreshRequest(req)) {
+  if (!isSameOriginWriteRequest(req)) {
     res.destroy()
     return
   }
 
-  const body = await readLimitedBody(req)
+  const body = await readLimitedBody(req, bodyLimitBytes)
   if (body === null) {
     // 上限超過時は header を送らず接続を切断し、残りの body を read しない
     res.destroy()
@@ -248,7 +256,7 @@ async function proxyRefreshRequest({
   } catch {
     sendText({
       res,
-      method: req.method ?? 'POST',
+      method: req.method ?? upstreamMethod,
       status: 400,
       body: 'Request body must be JSON'
     })
@@ -257,7 +265,7 @@ async function proxyRefreshRequest({
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     sendText({
       res,
-      method: req.method ?? 'POST',
+      method: req.method ?? upstreamMethod,
       status: 400,
       body: 'Request body must be a JSON object'
     })
@@ -265,8 +273,8 @@ async function proxyRefreshRequest({
   }
 
   try {
-    const upstream = await fetch(new URL(REFRESH_PROXY_PATH, `${hubUrl}/`), {
-      method: 'POST',
+    const upstream = await fetch(new URL(upstreamPath, `${hubUrl}/`), {
+      method: upstreamMethod,
       headers: {
         'content-type': 'application/json',
         Authorization: `Bearer ${hubRefreshToken}`
@@ -285,7 +293,7 @@ async function proxyRefreshRequest({
   } catch {
     sendText({
       res,
-      method: req.method ?? 'POST',
+      method: req.method ?? upstreamMethod,
       status: 502,
       body: 'Hub unavailable'
     })
@@ -308,7 +316,27 @@ async function handleRequest({
   const method = req.method ?? 'GET'
   const pathname = (req.url ?? '/').split('?')[0] ?? '/'
   if (method === 'POST' && pathname === REFRESH_PROXY_PATH) {
-    await proxyRefreshRequest({ req, res, hubUrl, hubRefreshToken })
+    await proxyHubJsonRequest({
+      req,
+      res,
+      hubUrl,
+      hubRefreshToken,
+      upstreamPath: REFRESH_PROXY_PATH,
+      upstreamMethod: 'POST',
+      bodyLimitBytes: REFRESH_PROXY_BODY_LIMIT_BYTES
+    })
+    return
+  }
+  if (method === 'PUT' && pathname === BUCKET_ORDER_PROXY_PATH) {
+    await proxyHubJsonRequest({
+      req,
+      res,
+      hubUrl,
+      hubRefreshToken,
+      upstreamPath: BUCKET_ORDER_PROXY_PATH,
+      upstreamMethod: 'PUT',
+      bodyLimitBytes: BUCKET_ORDER_PROXY_BODY_LIMIT_BYTES
+    })
     return
   }
   if (method !== 'GET' && method !== 'HEAD') {

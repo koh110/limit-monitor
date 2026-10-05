@@ -1,6 +1,6 @@
 import { asc, eq } from 'drizzle-orm'
-import { SCHEMA_VERSION } from 'shared/src/contracts'
-import { latestLimits } from 'shared/src/db/schema'
+import { bucketIdSchema, SCHEMA_VERSION } from 'shared/src/contracts'
+import { accountBucketOrders, latestLimits } from 'shared/src/db/schema'
 import { computeFreshness } from 'shared/src/freshness'
 import type * as schema from 'shared/src/schema'
 import type { Db } from '../../lib/database.js'
@@ -10,6 +10,46 @@ type StatusAccount = schema.components['schemas']['StatusAccount']
 type StatusBucket = schema.components['schemas']['StatusBucket']
 type StatusResponse =
   schema.paths['/api/v1/status']['get']['responses']['200']['content']['application/json']
+
+function parseBucketOrder(value: string) {
+  try {
+    const parsed: unknown = JSON.parse(value)
+    if (!Array.isArray(parsed)) return []
+    const bucketOrder: string[] = []
+    for (const bucketId of parsed) {
+      if (bucketIdSchema.safeParse(bucketId).success && !bucketOrder.includes(bucketId)) {
+        bucketOrder.push(bucketId)
+      }
+    }
+    return bucketOrder
+  } catch {
+    return []
+  }
+}
+
+function orderBuckets(buckets: StatusBucket[], bucketOrder: string[]) {
+  const bucketsById = new Map(
+    buckets.map((bucket) => {
+      return [bucket.bucketId, bucket] as const
+    })
+  )
+  const orderedBuckets: StatusBucket[] = []
+  const orderedIds = new Set<string>()
+  for (const bucketId of bucketOrder) {
+    const bucket = bucketsById.get(bucketId)
+    if (bucket && !orderedIds.has(bucketId)) {
+      orderedBuckets.push(bucket)
+      orderedIds.add(bucketId)
+    }
+  }
+  for (const bucket of buckets) {
+    if (!orderedIds.has(bucket.bucketId)) {
+      orderedBuckets.push(bucket)
+      orderedIds.add(bucket.bucketId)
+    }
+  }
+  return orderedBuckets
+}
 
 export async function getStatus({
   db,
@@ -25,6 +65,14 @@ export async function getStatus({
     .from(latestLimits)
     .orderBy(asc(latestLimits.provider), asc(latestLimits.accountAlias), asc(latestLimits.bucketId))
   const rows = provider ? await query.where(eq(latestLimits.provider, provider)) : await query
+  const preferenceQuery = db.select().from(accountBucketOrders)
+  const preferenceRows = provider
+    ? await preferenceQuery.where(eq(accountBucketOrders.provider, provider))
+    : await preferenceQuery
+  const bucketOrders = new Map<string, string[]>()
+  for (const row of preferenceRows) {
+    bucketOrders.set(`${row.provider}\n${row.accountAlias}`, parseBucketOrder(row.bucketOrder))
+  }
 
   const accounts = new Map<string, StatusAccount>()
   for (const row of rows) {
@@ -52,6 +100,13 @@ export async function getStatus({
       // 行が存在する時点で観測済みのため never にはならない
       freshness: freshness === 'never' ? 'expired' : freshness
     } satisfies StatusBucket)
+  }
+
+  for (const [key, account] of accounts) {
+    const bucketOrder = bucketOrders.get(key)
+    if (bucketOrder) {
+      account.buckets = orderBuckets(account.buckets, bucketOrder)
+    }
   }
 
   return {

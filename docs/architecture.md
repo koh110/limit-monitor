@@ -70,6 +70,7 @@ packages/shared/
   typespec/health.tsp       # /healthz, /readyz
   typespec/status.tsp       # /api/v1/status, /api/v1/status/{provider}
   typespec/observations.tsp # /api/v1/observations
+  typespec/preferences.tsp  # /api/v1/preferences/bucket-order
   typespec/refresh.tsp      # /api/v1/refresh-requests
   tspconfig.yaml            # openapi3 emitter 設定(OpenAPI 3.1)
   tsp-output/schema/openapi.yaml  # 中間生成物(git 管理しない)
@@ -127,6 +128,7 @@ main.tsp --(tsp compile)--> tsp-output/schema/openapi.yaml
 | GET | `/api/v1/status/:provider` | private network 制限 | provider 別状態 |
 | POST | `/api/v1/observations` | Collector Bearer Token | 観測値登録 |
 | POST | `/api/v1/refresh-requests` | `HUB_REFRESH_TOKEN` Bearer | provider + accountAlias 単位の durable refresh 要求 |
+| PUT | `/api/v1/preferences/bucket-order` | `HUB_REFRESH_TOKEN` Bearer | accountAlias 単位の bucket 表示順保存 |
 | GET | `/api/v1/refresh-requests/:id` | 不要 | refresh 要求の状態取得 |
 | WebSocket | `/api/v1/collector/control` | Collector Bearer Token | Collector Agent への outbound control / lifecycle 通知 |
 
@@ -187,7 +189,7 @@ Dashboard では Hub 到達不能(`offline`)と `stale` を別表示する。
 - schema は `packages/shared/src/db/schema.ts` を単一ソースとする
 - migration は `drizzle-kit generate` で SQL を生成し、Hub 起動時と
   `npm run db-migrate -w hub` で適用する。`drizzle-kit push` は検証用途のみ
-- MVP のテーブルは `latest_limits`、`collector_tokens`、`refresh_requests`（scope 単位で active request を coalesce し、terminal status は保持する。queued request は 24 時間で自動 purge）
+- MVP のテーブルは `latest_limits`、`collector_tokens`、`refresh_requests`、`account_bucket_orders`（scope 単位で active request を coalesce し、terminal status は保持する。queued request は 24 時間で自動 purge）。`account_bucket_orders.bucket_order` は bucket ID 配列を JSON text として保存する
 - WAL mode。DB ファイルは永続 volume に置き、再起動後も最新値が残る
 
 ## Dashboard(packages/client)
@@ -202,3 +204,5 @@ Dashboard では Hub 到達不能(`offline`)と `stale` を別表示する。
 - 各 provider + accountAlias カードの更新ボタンは Hub の durable refresh request API を使う。
   Hub は collector の outbound control WebSocketへ配送し、Dashboard は最大 5 分間 request status を
   500ms 間隔で polling する。completed 後に status を再取得し、failed / timeout は明示表示する。
+- bucket の上下移動は Dashboard の same-origin proxy 経由で Hub の preference API に保存する。
+  Hub の status API は保存済み順序を適用して bucket を返すため、再読み込み・別ブラウザでも順序を共有する。

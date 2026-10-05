@@ -226,6 +226,49 @@ test('Dashboard の same-origin refresh POST は Hub へ server-side Bearer 転�
   }
 })
 
+test('Dashboard の same-origin bucket order PUT は Hub へ server-side Bearer 転送する', async () => {
+  const upstream = vi.fn(async (input: URL, init?: RequestInit) => {
+    expect(input.toString()).toBe('http://hub.test/api/v1/preferences/bucket-order')
+    expect(init?.method).toBe('PUT')
+    expect(init?.headers).toEqual({
+      'content-type': 'application/json',
+      Authorization: 'Bearer dashboard-secret'
+    })
+    expect(init?.body).toBe(
+      '{"provider":"codex","accountAlias":"main","bucketOrder":["codex:secondary","codex:primary"]}'
+    )
+    return new Response(
+      '{"schemaVersion":1,"provider":"codex","accountAlias":"main","bucketOrder":["codex:secondary","codex:primary"]}',
+      {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      }
+    )
+  })
+  vi.stubGlobal('fetch', upstream)
+  try {
+    await withServer(
+      async (port) => {
+        const response = await request({
+          port,
+          requestPath: '/api/v1/preferences/bucket-order',
+          method: 'PUT',
+          headers: {
+            'content-type': 'application/json',
+            origin: `http://127.0.0.1:${port}`
+          },
+          body: '{"provider":"codex","accountAlias":"main","bucketOrder":["codex:secondary","codex:primary"]}'
+        })
+        expect(response.status).toBe(200)
+        expect(response.body).toContain('codex:secondary')
+      },
+      { hubUrl: 'http://hub.test', hubRefreshToken: 'dashboard-secret' }
+    )
+  } finally {
+    vi.unstubAllGlobals()
+  }
+})
+
 test('他サイトからの refresh POST は Hub へ送らず接続を切る', async () => {
   const upstream = vi.fn()
   vi.stubGlobal('fetch', upstream)
