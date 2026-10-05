@@ -135,8 +135,7 @@ export const CLAUDE_USAGE_CACHE_TTL_MS = resolvePositiveInt({
   name: 'CLAUDE_USAGE_CACHE_TTL_MS'
 })
 // 通常は CLI の `--version` から実行時に組み立てる。明示値は障害時の override 用。
-export const CLAUDE_USAGE_USER_AGENT =
-  process.env.CLAUDE_USAGE_USER_AGENT?.trim() || undefined
+export const CLAUDE_USAGE_USER_AGENT = process.env.CLAUDE_USAGE_USER_AGENT?.trim() || undefined
 
 // vendor CLI 実行の有限 timeout。CLI の cold start を見込んで既定 60 秒
 export const COMMAND_TIMEOUT_MS = resolvePositiveInt({

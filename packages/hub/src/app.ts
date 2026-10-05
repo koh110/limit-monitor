@@ -12,6 +12,7 @@ import * as health from './handlers/health/index.js'
 import * as observations from './handlers/observations/index.js'
 import * as status from './handlers/status/index.js'
 import * as refresh from './handlers/refresh/index.js'
+import * as preferences from './handlers/preferences/index.js'
 
 export function createApp({
   db,
@@ -49,6 +50,7 @@ export function createApp({
   status.createRoute(app, db)
   observations.createRoute(app, db, rateLimiter)
   refresh.createRoute(app, db, controlRegistry, refreshApiToken)
+  preferences.createRoute(app, db, refreshApiToken)
 
   return app
 }

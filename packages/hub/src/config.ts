@@ -47,8 +47,9 @@ export const HUB_REFRESH_TOKEN = process.env.HUB_REFRESH_TOKEN?.trim() || null
 // Ingest のリクエストボディ上限(仕様 7.2「リクエストボディ上限を小さく設定する」)
 export const INGEST_BODY_LIMIT_BYTES = 32 * 1024
 
-// 手動 refresh は固定小サイズのJSONだけを受け付ける
+// 手動 refresh と dashboard の設定更新は固定小サイズのJSONだけを受け付ける
 export const REFRESH_BODY_LIMIT_BYTES = 8 * 1024
+export const PREFERENCES_BODY_LIMIT_BYTES = 8 * 1024
 
 // Ingest の in-memory rate limit(fixed window)
 export const INGEST_RATE_LIMIT = {

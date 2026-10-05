@@ -19,6 +19,10 @@
       "types": "./dist/src/control.d.ts",
       "default": "./dist/src/control.js"
     },
+    "./src/preferences": {
+      "types": "./dist/src/preferences.d.ts",
+      "default": "./dist/src/preferences.js"
+    },
     "./src/schema": {
       "types": "./dist/src/schema.d.ts",
       "default": "./dist/src/schema.js"

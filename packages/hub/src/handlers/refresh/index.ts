@@ -1,7 +1,5 @@
 import type { Hono } from 'hono'
-import { createMiddleware } from 'hono/factory'
 import { bodyLimit } from 'hono/body-limit'
-import { timingSafeEqual } from 'node:crypto'
 import { and, desc, eq, isNull } from 'drizzle-orm'
 import { refreshRequestBodySchema, refreshStatusSchema } from 'shared/src/control'
 import type * as schema from 'shared/src/schema'
@@ -15,36 +13,11 @@ import {
 } from '../../features/refresh/store.js'
 import type { createControlRegistry } from '../../features/control.js'
 import { REFRESH_BODY_LIMIT_BYTES } from '../../config.js'
+import { dashboardAuthMiddleware } from '../../lib/dashboard-auth.js'
 import { createHttpException } from '../../lib/wrap.js'
 
 type RefreshApi = schema.paths['/api/v1/refresh-requests']['post']
 type RefreshResponse = RefreshApi['responses']
-type RefreshUnauthorized = RefreshResponse['401']['content']['application/problem+json']
-
-function sameSecret(actual: string, expected: string) {
-  const actualBytes = Buffer.from(actual)
-  const expectedBytes = Buffer.from(expected)
-  return (
-    actualBytes.byteLength === expectedBytes.byteLength &&
-    timingSafeEqual(actualBytes, expectedBytes)
-  )
-}
-
-function refreshAuthMiddleware(expectedToken: string | null) {
-  return createMiddleware(async (c, next) => {
-    const authorization = c.req.header('Authorization') ?? ''
-    const token = authorization.startsWith('Bearer ') ? authorization.slice('Bearer '.length) : ''
-    if (!expectedToken || !sameSecret(token, expectedToken)) {
-      throw createHttpException<RefreshUnauthorized>(401, {
-        type: 'about:blank',
-        title: 'Unauthorized',
-        status: 401,
-        detail: 'invalid or missing dashboard refresh token'
-      })
-    }
-    await next()
-  })
-}
 
 export function createRoute(
   app: Hono,
@@ -54,7 +27,7 @@ export function createRoute(
 ) {
   app.post(
     '/api/v1/refresh-requests',
-    refreshAuthMiddleware(refreshApiToken),
+    dashboardAuthMiddleware(refreshApiToken),
     bodyLimit({
       maxSize: REFRESH_BODY_LIMIT_BYTES,
       onError: () => {

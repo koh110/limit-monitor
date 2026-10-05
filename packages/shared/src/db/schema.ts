@@ -32,6 +32,19 @@ export const latestLimits = sqliteTable(
   }
 )
 
+export const accountBucketOrders = sqliteTable(
+  'account_bucket_orders',
+  {
+    provider: text('provider').notNull(),
+    accountAlias: text('account_alias').notNull(),
+    bucketOrder: text('bucket_order').notNull(),
+    updatedAt: text('updated_at').notNull()
+  },
+  (table) => {
+    return [primaryKey({ columns: [table.provider, table.accountAlias] })]
+  }
+)
+
 // token は sourceId + accountAlias の組に紐づく。1 つの sourceId が複数の
 // accountAlias(= 複数アカウント)の token を持てる(仕様 7.2)
 export const collectorTokens = sqliteTable(

@@ -7,14 +7,19 @@ import {
   type RefreshStatus
 } from 'shared/src/control'
 import type { Result } from 'shared/src/index'
+import { bucketOrderRequestSchema, bucketOrderResponseSchema } from 'shared/src/preferences'
 import { HUB_BASE_URL } from '../config'
 import { APIResult, client, createFetchOptions, toAPIResult } from './api'
 
 type StatusApiResult = APIResult<typeof client<'/api/v1/status', 'get'>, 200>
-const REFRESH_PROXY_BASE_URL = globalThis.location?.origin ?? HUB_BASE_URL
+const WRITE_PROXY_BASE_URL = globalThis.location?.origin ?? HUB_BASE_URL
 type CreateRefreshApiResult = APIResult<typeof client<'/api/v1/refresh-requests', 'post'>, 202>
 type RefreshStatusApiResult = APIResult<
   typeof client<'/api/v1/refresh-requests/{requestId}', 'get'>,
+  200
+>
+type SaveBucketOrderApiResult = APIResult<
+  typeof client<'/api/v1/preferences/bucket-order', 'put'>,
   200
 >
 
@@ -49,7 +54,7 @@ export async function requestRefresh(
   try {
     const requestBody = refreshRequestBodySchema.parse({ provider, accountAlias })
     const response = await client<'/api/v1/refresh-requests', 'post'>(
-      REFRESH_PROXY_BASE_URL,
+      WRITE_PROXY_BASE_URL,
       createFetchOptions({
         path: '/api/v1/refresh-requests',
         method: 'post',
@@ -96,5 +101,34 @@ export async function fetchRefreshStatus(
     return parsed.success ? parsed.data.status : null
   } catch {
     return null
+  }
+}
+
+export async function saveBucketOrder(
+  provider: Provider,
+  accountAlias: string,
+  bucketOrder: string[],
+  signal?: AbortSignal
+) {
+  try {
+    const requestBody = bucketOrderRequestSchema.parse({ provider, accountAlias, bucketOrder })
+    const response = await client<'/api/v1/preferences/bucket-order', 'put'>(
+      WRITE_PROXY_BASE_URL,
+      createFetchOptions({
+        path: '/api/v1/preferences/bucket-order',
+        method: 'put',
+        parameters: { query: undefined, header: undefined, path: undefined, cookie: undefined },
+        requestBody
+      }),
+      { signal }
+    )
+    const result: SaveBucketOrderApiResult = toAPIResult(response, 200)
+    if (result.status !== 200) return { ok: false as const, status: result.status }
+    const parsed = bucketOrderResponseSchema.safeParse(result.body)
+    return parsed.success
+      ? { ok: true as const, body: parsed.data }
+      : { ok: false as const, status: 502 }
+  } catch {
+    return { ok: false as const, status: 0 }
   }
 }

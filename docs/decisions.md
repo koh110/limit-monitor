@@ -20,7 +20,7 @@
 | ORM | Drizzle ORM + `drizzle-orm/node-sqlite`(driver: Node `node:sqlite`) | 追加 native 依存なし。**Prisma は採用しない(禁止)** |
 | migration | `drizzle-kit generate` + 起動時/`db-migrate` での適用。`push` は検証用途のみ | 生成 SQL をリポジトリ管理する |
 | 複数アカウント | `accountAlias` を payload / DB / API / UI の全レイヤーで扱う | 同一 provider 複数アカウントに対応 |
-| 履歴保存 | MVP では保存しない(`latest_limits` と `collector_tokens` のみ) | 仕様 8.2。必要になった時点で snapshot 方式を追加 |
+| 履歴保存 | 観測履歴は MVP では保存しないが、Dashboard の bucket 表示順は `account_bucket_orders` に保存する | 最新状態と UI 設定を分離し、再読み込み・別ブラウザでも表示順を共有する |
 | Ingest 認証 | Collector ごとの Bearer token(SHA-256 hash 保存、revoke/reissue 可) | 仕様 7.2 |
 | Node.js | 24.x | `node:sqlite` と strip-types を利用 |
 | Collector(Phase 1) | Linux 上で Codex/Claude/Grok の real provider を収集して送信する。mock mode は契約・UI検証用に残す | Claude は CLI `/usage`ではなく credentials の OAuth usage APIを利用し、値が取得できない場合は fake 値へ fallback しない |
