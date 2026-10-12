@@ -219,6 +219,345 @@ test('不正な bucket があっても他の正常 bucket は受理する(partia
   cleanup()
 })
 
+test('新しい完全な観測に含まれない bucket は削除する', async () => {
+  const { db, cleanup } = createTestDb()
+  await ingestObservation({
+    db,
+    observation: createObservation({
+      observedAt: '2026-08-23T04:00:00.000Z',
+      buckets: [
+        {
+          bucketId: 'codex:primary',
+          label: '5h',
+          usedPercent: 28.5,
+          remainingPercent: 71.5
+        },
+        {
+          bucketId: 'codex:reserve',
+          label: '7d',
+          usedPercent: 10,
+          remainingPercent: 90
+        }
+      ]
+    }),
+    tokenSourceId: 'dev-machine',
+    tokenAccountAlias: 'default',
+    now
+  })
+
+  await ingestObservation({
+    db,
+    observation: createObservation({
+      observedAt: '2026-08-23T04:10:00.000Z',
+      buckets: [
+        {
+          bucketId: 'codex:primary',
+          label: '5h',
+          usedPercent: 35,
+          remainingPercent: 65
+        }
+      ]
+    }),
+    tokenSourceId: 'dev-machine',
+    tokenAccountAlias: 'default',
+    now: new Date('2026-08-23T04:11:00.000Z')
+  })
+
+  expect((await statusBuckets(db)).map((bucket) => bucket.bucketId)).toEqual(['codex:primary'])
+  cleanup()
+})
+
+test('snapshot reconciliation は provider と accountAlias の scope を越えて削除しない', async () => {
+  const { db, cleanup } = createTestDb()
+  await ingestObservation({
+    db,
+    observation: createObservation({
+      observedAt: '2026-08-23T04:00:00.000Z',
+      buckets: [
+        {
+          bucketId: 'codex:primary',
+          label: '5h',
+          usedPercent: 28.5,
+          remainingPercent: 71.5
+        },
+        {
+          bucketId: 'codex:reserve',
+          label: '7d',
+          usedPercent: 10,
+          remainingPercent: 90
+        }
+      ]
+    }),
+    tokenSourceId: 'dev-machine',
+    tokenAccountAlias: 'default',
+    now
+  })
+  await ingestObservation({
+    db,
+    observation: createObservation({
+      observedAt: '2026-08-23T04:00:00.000Z',
+      buckets: [
+        {
+          bucketId: 'codex:reserve',
+          label: '7d',
+          usedPercent: 20,
+          remainingPercent: 80
+        }
+      ]
+    }),
+    tokenSourceId: 'dev-machine',
+    tokenAccountAlias: 'other',
+    now
+  })
+  await ingestObservation({
+    db,
+    observation: createObservation({
+      provider: 'grok',
+      observedAt: '2026-08-23T04:00:00.000Z',
+      buckets: [
+        {
+          bucketId: 'codex:reserve',
+          label: '7d',
+          usedPercent: 30,
+          remainingPercent: 70
+        }
+      ]
+    }),
+    tokenSourceId: 'dev-machine',
+    tokenAccountAlias: 'default',
+    now
+  })
+
+  await ingestObservation({
+    db,
+    observation: createObservation({
+      observedAt: '2026-08-23T04:10:00.000Z',
+      buckets: [
+        {
+          bucketId: 'codex:primary',
+          label: '5h',
+          usedPercent: 35,
+          remainingPercent: 65
+        }
+      ]
+    }),
+    tokenSourceId: 'dev-machine',
+    tokenAccountAlias: 'default',
+    now: new Date('2026-08-23T04:11:00.000Z')
+  })
+
+  const status = await getStatus({ db, now })
+  expect(
+    status.accounts
+      .find((account) => account.provider === 'codex' && account.accountAlias === 'default')
+      ?.buckets.map((bucket) => bucket.bucketId)
+  ).toEqual(['codex:primary'])
+  expect(
+    status.accounts
+      .find((account) => account.provider === 'codex' && account.accountAlias === 'other')
+      ?.buckets.map((bucket) => bucket.bucketId)
+  ).toEqual(['codex:reserve'])
+  expect(
+    status.accounts
+      .find((account) => account.provider === 'grok' && account.accountAlias === 'default')
+      ?.buckets.map((bucket) => bucket.bucketId)
+  ).toEqual(['codex:reserve'])
+  cleanup()
+})
+
+test('不正な bucket を含む観測では既存の未送信 bucket を削除しない', async () => {
+  const { db, cleanup } = createTestDb()
+  await ingestObservation({
+    db,
+    observation: createObservation({
+      observedAt: '2026-08-23T04:00:00.000Z',
+      buckets: [
+        {
+          bucketId: 'codex:primary',
+          label: '5h',
+          usedPercent: 28.5,
+          remainingPercent: 71.5
+        },
+        {
+          bucketId: 'codex:reserve',
+          label: '7d',
+          usedPercent: 10,
+          remainingPercent: 90
+        }
+      ]
+    }),
+    tokenSourceId: 'dev-machine',
+    tokenAccountAlias: 'default',
+    now
+  })
+
+  const result = await ingestObservation({
+    db,
+    observation: createObservation({
+      observedAt: '2026-08-23T04:10:00.000Z',
+      buckets: [
+        {
+          bucketId: 'codex:primary',
+          label: '5h',
+          usedPercent: 35,
+          remainingPercent: 65
+        },
+        {
+          bucketId: 'codex:reserve',
+          label: '7d',
+          usedPercent: 150,
+          remainingPercent: -50
+        }
+      ]
+    }),
+    tokenSourceId: 'dev-machine',
+    tokenAccountAlias: 'default',
+    now: new Date('2026-08-23T04:11:00.000Z')
+  })
+
+  expect(result.accepted).toEqual(['codex:primary'])
+  expect(result.rejected).toHaveLength(1)
+  expect((await statusBuckets(db)).map((bucket) => bucket.bucketId)).toEqual([
+    'codex:primary',
+    'codex:reserve'
+  ])
+  cleanup()
+})
+
+test('snapshot で削除した bucket への古い遅延観測は再挿入しない', async () => {
+  const { db, cleanup } = createTestDb()
+  await ingestObservation({
+    db,
+    observation: createObservation({
+      observedAt: '2026-08-23T04:00:00.000Z',
+      buckets: [
+        {
+          bucketId: 'codex:primary',
+          label: '5h',
+          usedPercent: 28.5,
+          remainingPercent: 71.5
+        },
+        {
+          bucketId: 'codex:reserve',
+          label: '7d',
+          usedPercent: 10,
+          remainingPercent: 90
+        }
+      ]
+    }),
+    tokenSourceId: 'dev-machine',
+    tokenAccountAlias: 'default',
+    now
+  })
+  await ingestObservation({
+    db,
+    observation: createObservation({
+      observedAt: '2026-08-23T04:10:00.000Z',
+      buckets: [
+        {
+          bucketId: 'codex:primary',
+          label: '5h',
+          usedPercent: 35,
+          remainingPercent: 65
+        }
+      ]
+    }),
+    tokenSourceId: 'dev-machine',
+    tokenAccountAlias: 'default',
+    now: new Date('2026-08-23T04:11:00.000Z')
+  })
+
+  const result = await ingestObservation({
+    db,
+    observation: createObservation({
+      observedAt: '2026-08-23T04:05:00.000Z',
+      buckets: [
+        {
+          bucketId: 'codex:reserve',
+          label: '7d',
+          usedPercent: 15,
+          remainingPercent: 85
+        }
+      ]
+    }),
+    tokenSourceId: 'dev-machine',
+    tokenAccountAlias: 'default',
+    now: new Date('2026-08-23T04:12:00.000Z')
+  })
+
+  expect(result.accepted).toEqual([])
+  expect(result.skipped).toEqual([{ bucketId: 'codex:reserve', reason: 'stale_observation' }])
+  expect((await statusBuckets(db)).map((bucket) => bucket.bucketId)).toEqual(['codex:primary'])
+  cleanup()
+})
+
+test('同時到着した完全な snapshot は観測時刻が新しい方で整合させる', async () => {
+  const { db, cleanup } = createTestDb()
+  await ingestObservation({
+    db,
+    observation: createObservation({
+      observedAt: '2026-08-23T04:00:00.000Z',
+      buckets: [
+        {
+          bucketId: 'codex:primary',
+          label: '5h',
+          usedPercent: 28.5,
+          remainingPercent: 71.5
+        },
+        {
+          bucketId: 'codex:reserve',
+          label: '7d',
+          usedPercent: 10,
+          remainingPercent: 90
+        }
+      ]
+    }),
+    tokenSourceId: 'dev-machine',
+    tokenAccountAlias: 'default',
+    now
+  })
+
+  await Promise.all([
+    ingestObservation({
+      db,
+      observation: createObservation({
+        observedAt: '2026-08-23T04:10:00.000Z',
+        buckets: [
+          {
+            bucketId: 'codex:primary',
+            label: '5h',
+            usedPercent: 35,
+            remainingPercent: 65
+          }
+        ]
+      }),
+      tokenSourceId: 'dev-machine',
+      tokenAccountAlias: 'default',
+      now: new Date('2026-08-23T04:10:00.000Z')
+    }),
+    ingestObservation({
+      db,
+      observation: createObservation({
+        observedAt: '2026-08-23T04:11:00.000Z',
+        buckets: [
+          {
+            bucketId: 'codex:reserve',
+            label: '7d',
+            usedPercent: 15,
+            remainingPercent: 85
+          }
+        ]
+      }),
+      tokenSourceId: 'dev-machine',
+      tokenAccountAlias: 'default',
+      now: new Date('2026-08-23T04:11:00.000Z')
+    })
+  ])
+
+  expect((await statusBuckets(db)).map((bucket) => bucket.bucketId)).toEqual(['codex:reserve'])
+  cleanup()
+})
+
 test('bucket の未知フィールドは互換性のため無視して受理する', async () => {
   const { db, cleanup } = createTestDb()
   const result = await ingestObservation({
