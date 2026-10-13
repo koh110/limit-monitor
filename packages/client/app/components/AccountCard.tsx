@@ -35,6 +35,7 @@ const RING_VIEWBOX_SIZE = 120
 const RING_CENTER = RING_VIEWBOX_SIZE / 2
 const RING_OUTER_RADIUS = 52
 const RING_INNER_RADIUS = 18
+const RING_TWO_BUCKET_INNER_RADIUS = 35
 const RING_COLOR_COUNT = MAX_BUCKETS_PER_OBSERVATION
 
 function getAccountFreshness(account: StatusAccount): StatusBucket['freshness'] | undefined {
@@ -68,9 +69,14 @@ function getBucketTone(bucket: StatusBucket) {
   })
 }
 
+function getRingInnerRadius(bucketCount: number) {
+  // 2本だけの場合は外側2本の位置に寄せて、中心の空きを保つ。
+  return bucketCount === 2 ? RING_TWO_BUCKET_INNER_RADIUS : RING_INNER_RADIUS
+}
+
 function getRingRadius(index: number, bucketCount: number) {
   if (bucketCount <= 1) return RING_OUTER_RADIUS
-  const radiusRange = RING_OUTER_RADIUS - RING_INNER_RADIUS
+  const radiusRange = RING_OUTER_RADIUS - getRingInnerRadius(bucketCount)
   return RING_OUTER_RADIUS - (index * radiusRange) / (bucketCount - 1)
 }
 
@@ -78,7 +84,7 @@ function getRingStrokeWidth(bucketCount: number) {
   const ringSpacing =
     bucketCount <= 1
       ? RING_OUTER_RADIUS - RING_INNER_RADIUS
-      : (RING_OUTER_RADIUS - RING_INNER_RADIUS) / (bucketCount - 1)
+      : (RING_OUTER_RADIUS - getRingInnerRadius(bucketCount)) / (bucketCount - 1)
   return Math.max(2, Math.min(9, ringSpacing * 0.72))
 }
 

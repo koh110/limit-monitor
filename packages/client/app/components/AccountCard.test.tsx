@@ -144,7 +144,9 @@ test('同じアカウントのbucketを同心円リングとして重ねて表�
   expect(primaryMeter.classList.contains('bucket-color-0')).toBe(true)
   expect(secondaryMeter.classList.contains('bucket-color-1')).toBe(true)
   expect(screen.getAllByText('残り')).toHaveLength(2)
-  expect(view.container.querySelectorAll('.bucket-ring-progress')).toHaveLength(2)
+  const progressRings = [...view.container.querySelectorAll('.bucket-ring-progress')]
+  expect(progressRings).toHaveLength(2)
+  expect(progressRings.map((ring) => ring.getAttribute('r'))).toEqual(['52', '35'])
   expect(view.container.querySelectorAll('.bucket-detail[open]')).toHaveLength(0)
 
   fireEvent.click(screen.getByText('Primary'))
