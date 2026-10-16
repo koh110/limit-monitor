@@ -52,7 +52,7 @@ limit-monitor/
    - 古い観測の遅延到着は上書きしない
    - `observedAt` 同時刻なら新しい `receivedAt` を採用
    - Hub 時刻より 5 分以上未来の `observedAt` は 400 で拒否
-4. `latest_limits`(provider + account_alias + bucket_id が PK)へ upsert する
+4. `latest_limits`(provider + account_alias + bucket_id が PK)へ upsert する。全 bucket を検証・受理できた観測は同じ scope の完全な snapshot として扱い、snapshot に含まれず、かつ snapshot より古い既存 bucket は削除する。scope の snapshot marker も同じ transaction で更新し、削除済み bucket への古い遅延観測を再挿入しない。不正または古い bucket を含む部分受理では削除しない
 5. Dashboard / Stream Deck は `GET /api/v1/status` を取得して表示する
 
 Claude の `weekly_scoped` bucket は、表示用slugだけでなくscopeのcanonical identityのdigestも含む

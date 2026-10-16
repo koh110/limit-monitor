@@ -32,6 +32,19 @@ export const latestLimits = sqliteTable(
   }
 )
 
+export const latestSnapshotMarkers = sqliteTable(
+  'latest_snapshot_markers',
+  {
+    provider: text('provider').notNull(),
+    accountAlias: text('account_alias').notNull(),
+    observedAt: text('observed_at').notNull(),
+    receivedAt: text('received_at').notNull()
+  },
+  (table) => {
+    return [primaryKey({ columns: [table.provider, table.accountAlias] })]
+  }
+)
+
 export const accountBucketOrders = sqliteTable(
   'account_bucket_orders',
   {
