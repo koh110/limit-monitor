@@ -172,13 +172,22 @@ function BucketRingOverview({
   buckets,
   now,
   onMove,
-  moveDisabled
+  moveDisabled,
+  expandedBucketIds,
+  onToggleBucket,
+  onToggleAllBuckets
 }: {
   buckets: StatusBucket[]
   now: Date
   onMove: (bucketId: string, direction: BucketMoveDirection) => void
   moveDisabled: boolean
+  expandedBucketIds: string[]
+  onToggleBucket: (bucketId: string, isOpen: boolean) => void
+  onToggleAllBuckets: () => void
 }) {
+  const allBucketsExpanded =
+    buckets.length > 0 && buckets.every((bucket) => expandedBucketIds.includes(bucket.bucketId))
+
   return (
     <section className="bucket-overview" aria-label="アカウントの残量">
       <div className="bucket-rings">
@@ -193,77 +202,99 @@ function BucketRingOverview({
           )
         })}
       </div>
-      <ul className="bucket-legend" aria-label="残量一覧">
-        {buckets.map((bucket, index) => {
-          const tone = getBucketTone(bucket)
-          const colorIndex = getRingColorIndex(index)
-          return (
-            <li key={bucket.bucketId} className="bucket-legend-item">
-              <div className="bucket-legend-row">
-                <details className={`bucket-detail bucket-color-${colorIndex} tone-${tone}`}>
-                  <summary className="bucket-legend-summary">
-                    <span className="bucket-legend-swatch" aria-hidden="true" />
-                    <span className="bucket-legend-label">{bucket.label}</span>
-                    <span className="remaining-caption">残り</span>
-                    <span className="bucket-legend-value">{bucket.remainingPercent}%</span>
-                    <Activity mode={bucket.reached ? 'visible' : 'hidden'}>
-                      <span className="reached">上限到達</span>
-                    </Activity>
-                  </summary>
-                  <dl className="bucket-meta">
-                    <div>
-                      <dt>使用済み</dt>
-                      <dd>{bucket.usedPercent}%</dd>
-                    </div>
-                    <div>
-                      <dt>リセット</dt>
-                      <dd>
-                        {formatJst(bucket.resetsAt)}
-                        <span className="until-reset">
-                          {formatUntilReset(bucket.resetsAt, now)}
-                        </span>
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>最終観測</dt>
-                      <dd>
-                        {formatJst(bucket.observedAt)}
-                        <span className="until-reset">{formatAgo(bucket.observedAt, now)}</span>
-                      </dd>
-                    </div>
-                  </dl>
-                </details>
-                <div className="bucket-order-actions" aria-label={`${bucket.label}の表示順を変更`}>
-                  <button
-                    className="bucket-order-button"
-                    type="button"
-                    onClick={() => {
-                      onMove(bucket.bucketId, 'up')
+      <div className="bucket-legend-panel">
+        <div className="bucket-legend-header">
+          <button
+            className="bucket-toggle-button"
+            type="button"
+            onClick={onToggleAllBuckets}
+            aria-expanded={allBucketsExpanded}
+          >
+            {allBucketsExpanded ? 'すべて閉じる' : 'すべて開く'}
+          </button>
+        </div>
+        <ul className="bucket-legend" aria-label="残量一覧">
+          {buckets.map((bucket, index) => {
+            const tone = getBucketTone(bucket)
+            const colorIndex = getRingColorIndex(index)
+            const isOpen = expandedBucketIds.includes(bucket.bucketId)
+            return (
+              <li key={bucket.bucketId} className="bucket-legend-item">
+                <div className="bucket-legend-row">
+                  <details
+                    className={`bucket-detail bucket-color-${colorIndex} tone-${tone}`}
+                    open={isOpen}
+                    onToggle={(event) => {
+                      onToggleBucket(bucket.bucketId, event.currentTarget.open)
                     }}
-                    disabled={moveDisabled || index === 0}
-                    aria-label={`${bucket.label}を1つ上へ`}
-                    title="上へ"
                   >
-                    ↑
-                  </button>
-                  <button
-                    className="bucket-order-button"
-                    type="button"
-                    onClick={() => {
-                      onMove(bucket.bucketId, 'down')
-                    }}
-                    disabled={moveDisabled || index === buckets.length - 1}
-                    aria-label={`${bucket.label}を1つ下へ`}
-                    title="下へ"
+                    <summary className="bucket-legend-summary">
+                      <span className="bucket-legend-swatch" aria-hidden="true" />
+                      <span className="bucket-legend-label">{bucket.label}</span>
+                      <span className="remaining-caption">残り</span>
+                      <span className="bucket-legend-value">{bucket.remainingPercent}%</span>
+                      <Activity mode={bucket.reached ? 'visible' : 'hidden'}>
+                        <span className="reached">上限到達</span>
+                      </Activity>
+                    </summary>
+                    <dl className="bucket-meta">
+                      <div>
+                        <dt>使用済み</dt>
+                        <dd>{bucket.usedPercent}%</dd>
+                      </div>
+                      <div>
+                        <dt>リセット</dt>
+                        <dd>
+                          {formatJst(bucket.resetsAt)}
+                          <span className="until-reset">
+                            {formatUntilReset(bucket.resetsAt, now)}
+                          </span>
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>最終観測</dt>
+                        <dd>
+                          {formatJst(bucket.observedAt)}
+                          <span className="until-reset">{formatAgo(bucket.observedAt, now)}</span>
+                        </dd>
+                      </div>
+                    </dl>
+                  </details>
+                  <div
+                    className="bucket-order-actions"
+                    aria-label={`${bucket.label}の表示順を変更`}
                   >
-                    ↓
-                  </button>
+                    <button
+                      className="bucket-order-button"
+                      type="button"
+                      onClick={() => {
+                        onMove(bucket.bucketId, 'up')
+                      }}
+                      disabled={moveDisabled || index === 0}
+                      aria-label={`${bucket.label}を1つ上へ`}
+                      title="上へ"
+                    >
+                      ↑
+                    </button>
+                    <button
+                      className="bucket-order-button"
+                      type="button"
+                      onClick={() => {
+                        onMove(bucket.bucketId, 'down')
+                      }}
+                      disabled={moveDisabled || index === buckets.length - 1}
+                      aria-label={`${bucket.label}を1つ下へ`}
+                      title="下へ"
+                    >
+                      ↓
+                    </button>
+                  </div>
                 </div>
-              </div>
-            </li>
-          )
-        })}
-      </ul>
+              </li>
+            )
+          })}
+        </ul>
+      </div>
     </section>
   )
 }
@@ -283,6 +314,7 @@ export function AccountCard({
   const [bucketOrder, setBucketOrder] = useState(() => {
     return account.buckets.map((bucket) => bucket.bucketId)
   })
+  const [expandedBucketIds, setExpandedBucketIds] = useState<string[]>([])
   const [bucketOrderSaveState, setBucketOrderSaveState] = useState<BucketOrderSaveState>('idle')
   const refreshController = useRef<AbortController | null>(null)
   const refreshing = refreshState === 'updating'
@@ -315,6 +347,29 @@ export function AccountCard({
         refreshController.current = null
       }
     }
+  }
+
+  function toggleBucket(bucketId: string, isOpen: boolean) {
+    setExpandedBucketIds((current) => {
+      if (isOpen) {
+        if (current.includes(bucketId)) return current
+        return [...current, bucketId]
+      }
+      return current.filter((currentBucketId) => {
+        return currentBucketId !== bucketId
+      })
+    })
+  }
+
+  function toggleAllBuckets() {
+    setExpandedBucketIds((current) => {
+      const bucketIds = account.buckets.map((bucket) => {
+        return bucket.bucketId
+      })
+      const allBucketsExpanded =
+        bucketIds.length > 0 && bucketIds.every((bucketId) => current.includes(bucketId))
+      return allBucketsExpanded ? [] : bucketIds
+    })
   }
 
   async function moveBucket(bucketId: string, direction: BucketMoveDirection) {
@@ -408,6 +463,9 @@ export function AccountCard({
           now={now}
           onMove={moveBucket}
           moveDisabled={savingBucketOrder}
+          expandedBucketIds={expandedBucketIds}
+          onToggleBucket={toggleBucket}
+          onToggleAllBuckets={toggleAllBuckets}
         />
       </Activity>
     </section>

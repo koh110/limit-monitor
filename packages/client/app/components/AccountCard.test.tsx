@@ -155,6 +155,76 @@ test('同じアカウントのbucketを同心円リングとして重ねて表�
   expect(view.container.querySelector('.meter')).toBeNull()
 })
 
+test('カード単位でbucket詳細を一括開閉し、個別の開閉状態も反映する', () => {
+  const buckets: StatusAccount['buckets'] = [
+    {
+      bucketId: 'codex:primary',
+      label: 'Primary',
+      usedPercent: 20,
+      remainingPercent: 80,
+      windowDurationSeconds: 3600,
+      resetsAt: '2026-09-11T01:00:00.000Z',
+      observedAt: '2026-09-11T00:00:00.000Z',
+      reached: false,
+      freshness: 'fresh'
+    },
+    {
+      bucketId: 'codex:secondary',
+      label: 'Secondary',
+      usedPercent: 80,
+      remainingPercent: 20,
+      windowDurationSeconds: 86400,
+      resetsAt: '2026-09-12T00:00:00.000Z',
+      observedAt: '2026-09-10T00:00:00.000Z',
+      reached: false,
+      freshness: 'stale'
+    }
+  ]
+  const view = render(
+    <>
+      <AccountCard
+        account={{ ...account, buckets }}
+        now={new Date('2026-09-11T00:00:00.000Z')}
+        onRefresh={vi.fn()}
+      />
+      <AccountCard
+        account={{ ...account, accountAlias: 'backup', buckets }}
+        now={new Date('2026-09-11T00:00:00.000Z')}
+        onRefresh={vi.fn()}
+      />
+    </>
+  )
+
+  const cards = view.container.querySelectorAll('.card')
+  const firstCard = cards[0]
+  const secondCard = cards[1]
+  expect(firstCard).not.toBeUndefined()
+  expect(secondCard).not.toBeUndefined()
+  if (!firstCard || !secondCard) throw new Error('2枚のアカウントカードが必要です')
+  const toggleButton = firstCard.querySelector<HTMLButtonElement>('.bucket-toggle-button')
+  expect(toggleButton).not.toBeNull()
+  if (!toggleButton) throw new Error('一括開閉ボタンが必要です')
+
+  expect(toggleButton.textContent).toBe('すべて開く')
+  fireEvent.click(toggleButton)
+  expect(firstCard.querySelectorAll('.bucket-detail[open]')).toHaveLength(2)
+  expect(secondCard.querySelectorAll('.bucket-detail[open]')).toHaveLength(0)
+  expect(toggleButton.textContent).toBe('すべて閉じる')
+
+  const firstSummary = firstCard.querySelector('.bucket-detail summary')
+  expect(firstSummary).not.toBeNull()
+  if (!firstSummary) throw new Error('bucket詳細のsummaryが必要です')
+  fireEvent.click(firstSummary)
+  expect(firstCard.querySelectorAll('.bucket-detail[open]')).toHaveLength(1)
+  expect(toggleButton.textContent).toBe('すべて開く')
+
+  fireEvent.click(toggleButton)
+  expect(firstCard.querySelectorAll('.bucket-detail[open]')).toHaveLength(2)
+  fireEvent.click(toggleButton)
+  expect(firstCard.querySelectorAll('.bucket-detail[open]')).toHaveLength(0)
+  expect(secondCard.querySelectorAll('.bucket-detail[open]')).toHaveLength(0)
+})
+
 test('契約上の最大bucket数でもリング色を重複させない', () => {
   const buckets: StatusAccount['buckets'] = []
   for (let index = 0; index < MAX_BUCKETS_PER_OBSERVATION; index += 1) {
