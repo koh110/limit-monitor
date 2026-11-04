@@ -337,6 +337,39 @@ body {
   transition: stroke-dasharray 220ms ease;
 }
 
+.bucket-legend-panel {
+  min-width: 0;
+}
+
+.bucket-legend-header {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 2px;
+}
+
+.bucket-toggle-button {
+  appearance: none;
+  min-height: 24px;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.bucket-toggle-button:hover {
+  border-color: var(--panel-border);
+  color: var(--green);
+}
+
+.bucket-toggle-button:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 1px;
+}
+
 .bucket-legend {
   min-width: 0;
   list-style: none;
